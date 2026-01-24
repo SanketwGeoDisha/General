@@ -1,0 +1,344 @@
+Category,KPI Code,Individual KPI,Weight,Data Source,Rubrics,Weight,
+Infrastructure & Sustainability,1.a.1,Number & quality of laboratories,11,"NAAC SSR, Institute website","Excellent (7–8): ?10 well-equipped labs, upgraded in last 3 yrs, industry-supported 
+
+Good (5–6): 6–9 functional labs, partial upgrades 
+
+Average (3–4): 3–5 basic labs 
+
+Poor (0–2): <3 outdated labs",11,110
+Infrastructure & Sustainability,1.a.2,Availability & quality of classrooms,8,"NAAC SSR, AICTE disclosure","Excellent: Adequate classrooms, smart boards, AC/ventilation 
+
+Good: Adequate rooms, partial ICT 
+
+Average: Congested/basic rooms 
+
+Poor: Inadequate classrooms",8,
+Infrastructure & Sustainability,1.a.3,ICT-enabled learning infrastructure,11,"NAAC, Website","Excellent: LMS + smart classrooms + simulation tools 
+
+Good: LMS + smart classrooms 
+
+Average: Limited ICT usage 
+
+Poor: Minimal ICT",11,
+Infrastructure & Sustainability,1.a.4,Workshops / practical training facilities,8,Institute website,"Excellent: Regular hands-on workshops & industry tools 
+
+Good: Periodic workshops 
+
+Average: Occasional exposure 
+
+Poor: No structured workshops",8,
+Infrastructure & Sustainability,1.a.5,Computer availability & computing infrastructure,7,AICTE disclosure,"Excellent: ?1 computer per 2 students, high-speed internet 
+
+Good: 1:3 ratio 
+
+Average: Limited systems 
+
+Poor: Inadequate infrastructure",7,
+Infrastructure & Sustainability,1.b.1,Number of physical books,6,NAAC SSR,"Excellent: ?50,000 volumes 
+
+Good: 25k–49k 
+
+Average: 10k–24k 
+
+Poor: <10k",6,
+Infrastructure & Sustainability,1.b.2,Subscription to academic journals,6,Library records,"Excellent: ?25 national/international journals 
+Good: 15–24 
+Average: 5–14 
+Poor: <5",6,
+Infrastructure & Sustainability,1.b.3,Access to e-resources,8,Library website,"Excellent: IEEE + Springer + Elsevier + NDL/DELNET 
+Good: 2–3 major databases 
+Average: Limited access 
+Poor: No e-resources",8,
+Infrastructure & Sustainability,1.b.4,Digital library access,5,Institute IT policy,"Excellent: 24×7 remote & on-campus access 
+Good: On-campus only 
+Average: Partial access 
+Poor: No digital library",5,
+Infrastructure & Sustainability,1.b.5,Library automation / ILMS,5,NAAC SSR,"Excellent: Fully automated ILMS with RFID 
+Good: ILMS without RFID 
+Average: Partial automation 
+Poor: Manual",5,
+Infrastructure & Sustainability,1.c.1,Hostel accommodation capacity,5,Institute website,"Excellent: ?70% students accommodated 
+Good: 50–69% 
+Average: 30–49% 
+Poor: <30%",5,
+Infrastructure & Sustainability,1.c.2,Safety & security arrangements,5,NAAC SSR,"Excellent: CCTV, access control, guards, fire safety 
+Good: CCTV + guards 
+Average: Basic security 
+Poor: Inadequate",5,
+Infrastructure & Sustainability,1.c.3,Hygiene & sanitation standards,4,NAAC SSR,"Excellent: Certified cleanliness & audits 
+Good: Regular maintenance 
+Average: Basic hygiene 
+Poor: Poor sanitation",4,
+Infrastructure & Sustainability,1.c.4,Food quality & mess facilities,3,Student feedback,"Excellent: Hygienic, varied menus, feedback-based 
+Good: Adequate quality 
+Average: Inconsistent 
+Poor: Poor quality",3,
+Infrastructure & Sustainability,1.c.5,Recreation & common facilities,3,Institute website,"Excellent: Sports + gym + clubs 
+Good: Sports/gym 
+Average: Limited facilities 
+Poor: None",3,
+Infrastructure & Sustainability,1.d.1,Smart campus / ERP implementation,5,ERP vendor / website,"Excellent: End-to-end ERP (academic, finance, HR) 
+Good: Partial ERP 
+Average: Standalone systems 
+Poor: Manual",5,
+Infrastructure & Sustainability,1.d.2,Solar energy utilization,4,Green audit,"Excellent: ?25% power from solar 
+Good: 10–24% 
+Average: <10% 
+Poor: None",4,
+Infrastructure & Sustainability,1.d.3,Water management & conservation,3,NAAC SSR,"Excellent: Rainwater harvesting + reuse 
+Good: One system 
+Average: Basic measures 
+Poor: None",3,
+Infrastructure & Sustainability,1.d.4,Sustainability initiatives,3,Green audit,"Excellent: Green campus, ISO, audits 
+Good: Some initiatives 
+Average: Minimal 
+Poor: None",3,
+Graduate Outcome & Employability,2.a.1,% of eligible students placed,65,"NIRF, AICTE Placement","Excellent: ?85% 
+Good: 70–84% 
+Average: 50–69% 
+Poor: <50%",65,160
+Graduate Outcome & Employability,2.b.1,Median compensation,55,NIRF,"Excellent: ??6 LPA 
+Good: ?4–5.9 LPA 
+Average: ?2–3.9 LPA 
+Poor: <?2 LPA",55,
+Graduate Outcome & Employability,2.c.1,% students in higher education,40,"NAAC, Alumni data","Excellent: ?25% 
+Good: 15–24% 
+Average: 5–14% 
+Poor: <5%",40,
+"Innovation, Startup & IP",,Incubation / IIC performance,30,AICTE–IIC,"Excellent: 4+ star IIC, active incubation 
+Good: 3-star 
+Average: 2-star 
+Poor: No IIC",35,110
+"Innovation, Startup & IP",,Start-up funding raised,30,Institute records,"Excellent: ??5 Cr 
+Good: ?1–5 Cr 
+Average: <?1 Cr 
+Poor: None",20,
+"Innovation, Startup & IP",,IP (Patents granted/licensed),30,"IPO, NAAC","Excellent: ?10 granted/licensed 
+Good: 5–9 
+Average: 1–4 
+Poor: None",40,
+"Innovation, Startup & IP",,TRL progression,20,R&D cell,"Excellent: Multiple TRL 6–9 prototypes 
+Good: TRL 4–5 
+Average: TRL 2–3 
+Poor: No progression",15,
+Research Quality & Impact Output,,Scopus Indexed Publications,30,Scopus / WoS / UGC-CARE / Vidwan / Institute Website / IRINS,"Excellent (27–30): ? 2.5 indexed journal papers per faculty/year (rolling 3-year avg) and annual growth ?10%
+Good (21–26): 1.5 to <2.5 indexed papers/year — growth ?5%
+Average (11–20): 0.75 to <1.5 indexed papers/year — growth <5%
+Poor (0–10): <0.75 indexed papers/year OR mostly non-indexed publications",30,130
+Research Quality & Impact Output,,Citations & Impact Factor,50,Scopus / WoS / Vidwan / IRINS / Website,"Excellent (45–50): Average citations ?10 per paper (last 3–5 years) AND h-index ?15
+Good (35–44): Citations 5–9 per paper AND h-index 10–14
+Average (20–34): Citations 2–4 per paper AND h-index 5–9
+Poor (0–19): Citations <2 per paper OR h-index <5",50,
+Research Quality & Impact Output,,Sponsored Research & Grants,30,"Funding agency websites, Institute reports, Scopus / IRINS","Excellent (27–30): ? ?2 Cr total funding; ?5 active external projects from major agencies; valid sanction & UC documents
+Good (21–26): ?50 L–2 Cr funding; 2–4 active projects; mix of government/industry sponsors
+Average (11–20): ?10–50 L funding; 1–2 minor projects; mostly government-only support
+Poor (0–10): <?10 L or no external funded projects; no valid documentation",30,
+Research Quality & Impact Output,,Research Collaborations,20,"Institute reports, MoUs, Scopus / IRINS","Excellent (17–20): ?10 active collaborative projects/MoUs with industry/academia in last 3 years AND tangible outputs
+Good (13–16): 5–9 collaborations or MoUs AND some output
+Average (7–12): 2–4 collaborations/MoUs; limited output
+Poor (0–6): <2 collaborations/MoUs OR no documented output",20,
+Admissions (Quality & Diversity),,Entry Merit / Cut-off,30,Mandatory disclosure / Counselling portal,"Excellent (25–30): 90th percentile based on National / State exams
+Good (20–24): 75th percentile based on National / State exams
+Average (10–19): 50th percentile based on National / State exams
+Poor (0–9): below 50th percentile",30,70
+Admissions (Quality & Diversity),,Gender Diversity(% of female students enrolled),15,"NIRF, AICTE Approval Data, Institute Website","Excellent (13–15): ?30% female enrollment
+Good (10–12): 25–29% female
+Average (6–9): 18–24% female
+Poor (0–5): <18% female",15,
+Admissions (Quality & Diversity),,Regional Diversity(% of out-of-state students),10,"NIRF, AICTE Approval Data, Institute Website","Excellent (9–10): ?15% out-of-state students
+Good (7–8): 10–14% out-of-state
+Average (4–6): 5–9% out-of-state
+Poor (0–3): <5% or negligible",10,
+Admissions (Quality & Diversity),,Admission Demand Ratio,15,Mandatory disclosure / Counselling portal,"Excellent (13–15): >20 applications per seat, consistent year-on-year growth
+Good (10–12): 5–20 applications/seat
+Average (6–9): 2–5 applications/seat
+Poor (0–5): <1–2 applications/seat, unfilled seats >10%",15,
+Industry Integration,,Number of Active Industry MoUs(Count of valid MoUs (?3 years old)),30,"AICTE–MoU Dashboard, Institute Website","Excellent (10–12): ?15 active MoUs
+Good (7–9): 8–14 MoUs
+Average (4–6): 3–7 MoUs
+Poor (0–3): <3 MoUs",30,100
+Industry Integration,,"Outcome-Based MoUs(% MoUs with internships, projects, placements, R&D outcomes)",6,NAAC 5.3.3,"Excellent (9–10): ?70% MoUs outcome-based
+Good (7–8): 50–69%
+Average (4–6): 30–49%
+Poor (0–3): <30%",30,
+Industry Integration,,Reputed Industry Partners(MoUs with Tier-1 / reputed national & global companies),5,AICTE–MoU Dashboard,"Excellent (7–8): ?5 reputed partners
+Good (5–6): 3–4 partners
+Average (3–4): 1–2 partners
+Poor (0–2): None",,
+Industry Integration,,Joint Research & Consultancy(Joint R&D / consultancy projects with industry),5,"NAAC 3.3.3, NIRF Research","Excellent (9–10): ?10 projects (3 yrs)
+Good (7–8): 5–9 projects
+Average (4–6): 2–4 projects
+Poor (0–3): ?1 or none",,
+Industry Integration,,Industry-Led FDPs(FDPs conducted with industry collaboration),5,NAAC 5.3.3,"Excellent (5–6): ?8 FDPs (3 yrs)
+Good (4): 5–7 FDPs
+Average (2–3): 2–4 FDPs
+Poor (0–1): ?1",,
+Industry Integration,,Joint Certifications / Programs(Industry-recognized certifications or joint programs),5,"NIRF Outreach, Institute Website","Excellent (5–6): ?6 programs
+Good (4): 4–5 programs
+Average (2–3): 2–3 programs
+Poor (0–1): ?1",,
+Industry Integration,,Visiting Industry Experts(Industry experts as visiting faculty / scholars),4,NIRF Outreach,"Excellent (7–8): ?25 experts (3 yrs)
+Good (5–6): 15–24 experts
+Average (3–4): 5–14 experts
+Poor (0–2): <5",,
+Industry Integration,,Industry Co-Taught Courses(Courses co-taught by industry experts),8,NAAC 1.2.1 / 1.3.1,"Excellent (7–8): ?20% courses co-taught
+Good (5–6): 10–19%
+Average (3–4): 5–9%
+Poor (0–2): <5%",20,
+Industry Integration,,Adjunct Industry Faculty(Industry professionals as adjunct / visiting faculty),6,AICTE Faculty Portal,"Excellent (5–6): ?10 adjunct faculty
+Good (4): 6–9
+Average (2–3): 3–5
+Poor (0–1): <3",,
+Industry Integration,,Certification-Based Credits(Credits tied to NPTEL / industry certifications),6,"NPTEL, Institute Website","Excellent (5–6): ?15% credits certification-linked
+Good (4): 8–14%
+Average (2–3): 3–7%
+Poor (0–1): <3%",,
+Industry Integration,,Industry Representation in BoS(Industry members in BoS),6,BoS Minutes,"Excellent (5–6): Industry reps in all major BoS
+Good (4): Present in most BoS
+Average (2–3): Limited presence
+Poor (0–1): None",20,
+Industry Integration,,Industry-Aligned Curriculum Updates(Curriculum updates based on industry input),8,NAAC 1.2.1,"Excellent (7–8): Annual updates with industry review
+Good (5–6): Updates every 2 years
+Average (3–4): Occasional updates
+Poor (0–2): No evidence",,
+Industry Integration,,Industry-Evaluated Projects & Labs(Industry role in project evaluation & lab design),6,IQAC Reports,"Excellent (5–6): Industry evaluates ?50% projects/labs
+Good (4): 30–49%
+Average (2–3): 10–29%
+Poor (0–1): <10%",,
+Teaching and Learning Environment,,PhD Faculty %age,30,"IRINS, NIRF","Excellent(25-30): >60%
+Good(15-25): 40–60%
+Average(5-15): 25–40%
+Poor(0-5): <25%",30,120
+Teaching and Learning Environment,,Average teaching experience of faculty,20,AICTE mandatory disclosure,"Excellent(15-20): >10 yrs
+Good(10-15): 7–10 yrs
+Average(5-10): 4–7 yrs
+Poor(0-5): <4 yrs",20,
+Teaching and Learning Environment,,Student–Faculty Ratio (?1:20 ? 30 marks; 1:21–25 ? 20 marks; >25 ? 10 marks),30,AICTE mandatory disclosure,"Excellent (27 –30): ?1:20 (AICTE compliant across all programs); ratio verified from approved faculty list in AICTE portal; stable staffing over 3 years.
+Good (21–26): 1:21–25; minor shortfall in some departments; faculty count updated and approved by AICTE.
+Average (11–20): 1:26–30; moderate faculty shortage or temporary/contractual dependence.
+Poor (0–10): >1:30; significant vacancies or non-compliance with AICTE norms.",30,
+Teaching and Learning Environment,,Research Publications(Avg. research papers per faculty (last 3 years)),8,"AICTE Mandatory Disclosure, Institute Website","Excellent (7–8): ?1 paper per faculty per year (Scopus/WoS/UGC-CARE)
+Good (5–6): 0.5–0.99 papers per faculty/year
+Average (3–4): 0.2–0.49 papers per faculty/year
+Poor (0–2): <0.2 or none",20,
+Teaching and Learning Environment,,Faculty Development Programs (FDPs)(% faculty attending FDPs annually),6,"AICTE Mandatory Disclosure, IQAC Reports","Excellent (5–6): ?80% faculty attend ?1 FDP/year
+Good (4): 60–79% faculty
+Average (2–3): 30–59% faculty
+Poor (0–1): <30% faculty",,
+Teaching and Learning Environment,,Professional Certifications(% faculty with industry/professional certifications),6,"AICTE Mandatory Disclosure, Institute Website","Excellent (5–6): ?50% faculty certified (NPTEL, Coursera, AWS, Cisco, etc.)
+Good (4): 30–49% faculty certified
+Average (2–3): 10–29% faculty certified
+Poor (0–1): <10%",,
+Teaching and Learning Environment,,Faculty Awards & Recognition(% faculty with awards/recognition in last 3 years),10,"AQAR Reports, NAAC 6.3.3, Institute Website","Excellent (3): ?30% faculty with awards (national/international/state/industry)
+Good (2): 15–29% faculty
+Average (1): 5–14% faculty
+Poor (0): <5% or none",10,
+Teaching and Learning Environment,,Pass rates & backlog,10,AICTE mandatory disclosure,"Excellent (9-10): ?90% pass rate across all programs; consistent upward trend or stable >90% for 3 years.
+Good (7-8): 80–89% pass rate; minor year-to-year variation (<5%)
+Average (4-6): 65–79% pass rate; moderate variation (5–10% fluctuation)
+Poor (0–3): <65% pass rate; inconsistent or declining results",10,
+Student Experience and Well-Being,,Sports Infrastructure & Achievements(Facilities),10,website/google reviews,"Excellent (8–10):
+?5 well-maintained sports facilities (indoor + outdoor), modern equipment, dedicated grounds/courts, year-round accessibility.
+
+Good (6–7):
+3–4 functional facilities, adequate equipment, regular student access.
+
+Average (3–5):
+1–2 basic facilities, limited equipment, shared or constrained access.
+
+Poor (0–2):
+No dedicated sports facilities or severely inadequate infrastructure.",25,50
+Student Experience and Well-Being,,Sports Infrastructure & Achievements(tournaments),10,website/google reviews,"Excellent (8–10):
+Regular participation at state and national levels across multiple sports, annual representation.
+
+Good (6–7):
+Consistent inter-college and occasional state-level participation.
+
+Average (3–5):
+Occasional inter-college tournaments, irregular participation.
+
+Poor (0–2):
+Rare or no participation in organized tournaments.",,
+Student Experience and Well-Being,,Sports Infrastructure & Achievements(achievements),5,,"Excellent (4–5):
+Multiple podium finishes or titles at state/national level in recent years.
+
+Good (3):
+Recognized wins or top finishes at inter-college or district level.
+
+Average (1–2):
+Participation certificates or isolated minor achievements.
+
+Poor (0):
+No notable or recorded sports achievements.",,
+Student Experience and Well-Being,,Active Clubs,25,website/google reviews,"Excellent (13–15): ?10 active clubs with ?2 events/semester.
+Good (10–12): 6–9 clubs, periodic events.
+Average (6–9): 3–5 clubs, irregular activity.
+Poor (0–5): <3 clubs, low engagement.",25,
+Internationalization & Global Reputation,,International Students Percentage(% of enrolled international students),12,"NAAC 3.7.1, NIRF Outreach, Institute IR Office data","Excellent (10–12): ?5% international students
+Good (7–9): 3–4.9% international students
+Average (4–6): 1–2.9% international students
+Poor (0–3): <1% or none",20,40
+Internationalization & Global Reputation,,Faculty Exchange Programs(Active inbound/outbound faculty exchange programs),8,"Institute MoUs, International Relations Office, NAAC 3.7.1","Excellent (7–8): ?5 active faculty exchange programs (last 3 years)
+Good (5–6): 3–4 exchange programs
+Average (3–4): 1–2 exchange programs
+Poor (0–2): No active exchange programs",,
+Internationalization & Global Reputation,,International reputation(Global reputation of the institute),20,"QS/THE ranking, NIRF Perception score, media citations","Excellent (13–15): Ranked in QS/Times or global collaborations; strong foreign student reviews or recognitions.
+Good (10–12): Nationally reputed with limited international recognition.
+Average (6–9): Regional or industry-linked exposure.
+Poor (0–5): No international footprint.",20,
+Quality Assurance and NEP Implementation,,"NAAC Accreditation Grade(A++, A+, A, B++ (scaled))",20,http://naac.gov.in/index.php/en/assessment-accreditation,"Excellent (18–20): NAAC Grade A++ / A+ (CGPA ? 3.26)
+Good (14–17): Grade A (CGPA 3.01–3.25)
+Average (8–13): Grade B++ / B+ (CGPA 2.51–3.00)
+Poor (0–7): Grade B / C / Not accredited",20,110
+Quality Assurance and NEP Implementation,,NBA Accreditation(% programs accredited),10,"NBA Portal, AICTE Approved List, IQAC Reports, institute website","Excellent (9–10): ?75% of eligible UG/PG programs accredited (valid, not expired); includes core engineering branches; ?2 accreditation cycles completed.
+Good (7–8): 50–74% of eligible programs accredited; valid accreditation cycle ongoing; renewal or reapplication in progress.
+Average (4–6): 25–49% programs accredited or under NBA review (Applied/Visit Scheduled); mostly first-time accreditations.
+Poor (0–3): <25% programs accredited OR accreditation expired/not renewed; no active NBA process.",10,
+Quality Assurance and NEP Implementation,,NIRF Ranking(Based on national rank band),10,NIRF Portal,"Excellent (9–10): Rank <100 in NIRF (Engineering/Overall)
+Good (7–8): Rank 101–200
+Average (4–6): Rank 201–300 / Participating Institute
+Poor (0–3): Not participating or >300",10,
+Quality Assurance and NEP Implementation,,Institutional Status(Autonomous (30) ? Deemed/Private Univ (25) ? Affiliated (20)),30,"UGC Portal, AICTE Approved List, Institute Website","Excellent (18–20): Autonomous / Deemed / Private University with full academic autonomy
+Good (15–17): Affiliated college with partial autonomy (BoS or internal flexibility)
+Average (8–14): Affiliated but compliant with OBE/NEP reforms
+Poor (0–7): Strictly affiliated with limited curriculum control",30,
+Quality Assurance and NEP Implementation,,BoS (Board of Studies)(Existence & activity of BoS),4,Institute website / IQAC reports / BoS Minutes,"Excellent (4): Active & regular meetings
+Good (3): Functional but occasional meetings
+Average (2): Minimal activity
+Poor (0–1): Non-functional",10,
+Quality Assurance and NEP Implementation,,Decision-making Autonomy,3,Institute website / IQAC reports / BoS Minutes,"Excellent (3): Full autonomy in curriculum & academic policies
+Good (2): Partial autonomy
+Average (1): Limited autonomy
+Poor (0): No autonomy",,
+Quality Assurance and NEP Implementation,,Digital Governance(Adoption of ERP/digital academic processes),3,Institute website / IQAC reports / BoS Minutes,"Excellent (3): Fully digital systems & processes
+Good (2): Partially digital
+Average (1): Limited digital adoption
+Poor (0): Manual/non-digital",,
+Quality Assurance and NEP Implementation,,Multidisciplinary Curriculum(Extent of multidisciplinary courses offered),5,Institute website / IQAC Reports,"Excellent (5): Fully integrated across programs
+Good (4): Partial integration
+Average (2–3): Minimal integration
+Poor (0–1): None",30,
+Quality Assurance and NEP Implementation,,ABC (Activity-Based Curriculum)(Adoption of ABC framework),5,Institute website / IQAC Reports,"Excellent (5): Full ABC adoption
+Good (4): Partial adoption
+Average (2–3): Early adoption
+Poor (0–1): Not adopted",,
+Quality Assurance and NEP Implementation,,FY Foundation Course(Foundation course for first-year students),5,Institute website / IQAC Reports,"Excellent (5): Fully implemented
+Good (4): Partially implemented
+Average (2–3): Limited implementation
+Poor (0–1): Not implemented",,
+Quality Assurance and NEP Implementation,,OBE (Outcome-Based Education)(Implementation of OBE framework),5,Institute website / IQAC Reports,"Excellent (5): Fully implemented
+Good (4): Partially implemented
+Average (2–3): Early adoption
+Poor (0–1): Not implemented",,
+Quality Assurance and NEP Implementation,,Internships(Integration of internships in curriculum),5,Institute website / IQAC Reports,"Excellent (5): Mandatory & integrated
+Good (4): Optional or partially integrated
+Average (2–3): Limited opportunities
+Poor (0–1): None",,
+Quality Assurance and NEP Implementation,,Value-Added Courses(Offering of additional skill/value courses),3,Institute website / IQAC Reports,"Excellent (3): Multiple integrated courses
+Good (2): Some courses
+Average (1): Few courses
+Poor (0): None",,
+Quality Assurance and NEP Implementation,,4-Year UG Design(Implementation of flexible 4-year UG program),2,Institute website / IQAC Reports,"Excellent (2): Fully implemented across programs with multiple exit options, ABC integration, curriculum restructuring, and formal approvals
+Good (1.5): Implemented in most programs; exit options and flexibility defined but not uniformly operational
+Average (1): Framework approved and pilot implementation started in select programs; limited student uptake
+Poor (0): Not implemented / only proposal stage",,
