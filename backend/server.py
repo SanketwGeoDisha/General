@@ -17,6 +17,8 @@ import re
 from urllib.parse import urlparse, quote
 from bs4 import BeautifulSoup
 import time
+from concurrent.futures import ThreadPoolExecutor, as_completed
+import functools
 
 ROOT_DIR = Path(__file__).parent
 load_dotenv(ROOT_DIR / '.env')
@@ -483,6 +485,10 @@ class CollegeKPIAuditor:
             'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8',
             'Accept-Language': 'en-US,en;q=0.5',
         })
+        # Disable SSL verification for problematic sites (with warning suppression)
+        import urllib3
+        urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
+        self.session.verify = False
         
     def _load_kpis_from_schema(self) -> List[Dict]:
         """Load KPIs from KPI_SCHEMA constant"""
@@ -503,7 +509,7 @@ class CollegeKPIAuditor:
         return kpis
 
     def search_for_kpi(self, college_name: str, kpi: Dict, abbreviation: str = "") -> Dict[str, Any]:
-        """Search specifically for a single KPI using its keywords"""
+        """Search specifically for a single KPI using its keywords - ENHANCED VERSION"""
         kpi_data = {
             "kpi_name": kpi['name'],
             "search_results": [],
@@ -514,25 +520,21 @@ class CollegeKPIAuditor:
         if not keywords:
             return kpi_data
         
-        # Build targeted search queries for this KPI
+        # Build targeted search queries for this KPI - MORE COMPREHENSIVE
         queries = []
         
-        # Use first 2-3 keywords for variety
-        for keyword in keywords[:3]:
+        # Use top 2 keywords for speed
+        for keyword in keywords[:2]:
             queries.append(f'"{college_name}" {keyword}')
-            if abbreviation:
-                queries.append(f'"{abbreviation}" {keyword}')
         
-        # Add site-specific searches for official sources
+        # Add site-specific search for official sources
         primary_keyword = keywords[0] if keywords else kpi['name']
-        queries.extend([
-            f'site:.ac.in OR site:.edu.in "{college_name}" {primary_keyword}',
-            f'site:nirfindia.org "{college_name}" {primary_keyword}',
-        ])
+        queries.append(f'site:.ac.in OR site:.edu.in "{college_name}" {primary_keyword}')
         
         seen_urls = set()
         
-        for query in queries[:5]:  # Limit to 5 queries per KPI
+        # Reduced to 3 queries per KPI for speed
+        for query in queries[:3]:
             result = self.search_official_sources(query, num_results=5)
             if result.get("official_results"):
                 for r in result["official_results"]:
@@ -540,11 +542,10 @@ class CollegeKPIAuditor:
                     if url not in seen_urls:
                         seen_urls.add(url)
                         kpi_data["search_results"].append(r)
-            time.sleep(0.15)  # Rate limiting
+            time.sleep(0.03)  # Minimal rate limiting
         
-        # Fetch content from top 2 official URLs
-        urls_to_fetch = [r['url'] for r in kpi_data["search_results"][:2] 
-                         if not r['url'].lower().endswith('.pdf')]
+        # Fetch content from top 3 official URLs for speed
+        urls_to_fetch = [r['url'] for r in kpi_data["search_results"][:3]]
         
         for url in urls_to_fetch:
             content = self.fetch_webpage_content(url, max_length=8000)
@@ -553,43 +554,232 @@ class CollegeKPIAuditor:
         
         return kpi_data
 
-    def fetch_webpage_content(self, url: str, max_length: int = 15000) -> Dict[str, Any]:
-        """Fetch and extract text content from a webpage"""
+    def search_public_disclosure(self, college_name: str, abbreviation: str = "") -> Dict[str, Any]:
+        """
+        Search for Mandatory Public Disclosure pages (AICTE/UGC requirement).
+        These pages contain standardized KPI data like faculty, infrastructure, placements, etc.
+        """
+        disclosure_data = {
+            "pages": [],
+            "pdfs": [],
+            "fetched_content": []
+        }
+        
+        # Mandatory Disclosure search queries - AICTE requires all colleges to have these
+        disclosure_queries = [
+            f'"{college_name}" "mandatory disclosure" site:.ac.in OR site:.edu.in',
+            f'"{college_name}" "public disclosure" AICTE',
+            f'"{college_name}" "mandatory disclosure" filetype:pdf',
+            f'"{college_name}" AICTE approval faculty infrastructure',
+        ]
+        
+        if abbreviation:
+            disclosure_queries.append(f'"{abbreviation}" "mandatory disclosure"')
+        
+        seen_urls = set()
+        
+        # Execute disclosure searches in parallel
+        def run_disclosure_search(query):
+            return self.search_official_sources(query, num_results=10)
+        
+        with ThreadPoolExecutor(max_workers=4) as executor:
+            future_to_query = {executor.submit(run_disclosure_search, q): q for q in disclosure_queries}
+            for future in as_completed(future_to_query):
+                result = future.result()
+                if result.get("official_results"):
+                    for r in result["official_results"]:
+                        url = r.get('url', '')
+                        if url and url not in seen_urls:
+                            seen_urls.add(url)
+                            # Check if it's a PDF
+                            if url.lower().endswith('.pdf'):
+                                disclosure_data["pdfs"].append(r)
+                            else:
+                                disclosure_data["pages"].append(r)
+        
+        logger.info(f"Found {len(disclosure_data['pages'])} disclosure pages and {len(disclosure_data['pdfs'])} PDFs")
+        return disclosure_data
+
+    def fetch_disclosure_page_and_pdfs(self, page_url: str, max_pdfs: int = 3) -> Dict[str, Any]:
+        """
+        Fetch a disclosure page and extract PDF links from it.
+        Returns page content plus any linked PDF content.
+        """
+        result = {
+            "page_content": None,
+            "pdf_links": [],
+            "pdf_contents": []
+        }
+        
         try:
-            # Skip PDFs and non-HTML
-            if url.lower().endswith('.pdf'):
-                return {"url": url, "content": "", "error": "PDF files not supported", "success": False}
-            
-            response = self.session.get(url, timeout=15, allow_redirects=True)
+            # Fetch the HTML page
+            response = self.session.get(page_url, timeout=30, allow_redirects=True, verify=False)
             response.raise_for_status()
             
-            # Parse HTML
             soup = BeautifulSoup(response.text, 'html.parser')
             
-            # Remove script, style elements
+            # Extract all PDF links from the page
+            base_url = '/'.join(page_url.split('/')[:3])
+            pdf_links = set()
+            
+            for link in soup.find_all('a', href=True):
+                href = link['href']
+                # Check if it's a PDF link
+                if '.pdf' in href.lower():
+                    # Handle relative URLs
+                    if href.startswith('/'):
+                        full_url = base_url + href
+                    elif href.startswith('http'):
+                        full_url = href
+                    else:
+                        # Relative to current path
+                        full_url = '/'.join(page_url.rsplit('/', 1)[:-1]) + '/' + href
+                    
+                    # Filter for disclosure-related PDFs
+                    href_lower = href.lower()
+                    if any(kw in href_lower for kw in ['disclosure', 'faculty', 'infrastructure', 'placement', 
+                                                        'admission', 'approval', 'aicte', 'mandatory', 
+                                                        'annual', 'report', 'ssr', 'aqar', 'naac']):
+                        pdf_links.add(full_url)
+                    elif len(pdf_links) < max_pdfs:
+                        # Include other PDFs if we haven't found disclosure-specific ones
+                        pdf_links.add(full_url)
+            
+            # Remove script, style elements for text extraction
             for script in soup(["script", "style", "nav", "footer", "header", "aside"]):
                 script.decompose()
             
-            # Get text
             text = soup.get_text(separator=' ', strip=True)
-            
-            # Clean up whitespace
             text = re.sub(r'\s+', ' ', text)
             
-            # Truncate if too long
+            result["page_content"] = {
+                "url": page_url,
+                "title": soup.title.string if soup.title else "Disclosure Page",
+                "content": text[:15000],
+                "success": True
+            }
+            
+            result["pdf_links"] = list(pdf_links)[:max_pdfs]
+            
+            # Fetch PDF contents in parallel
+            def fetch_single_pdf(pdf_url):
+                return self._fetch_pdf_content(pdf_url, max_length=25000)
+            
+            if result["pdf_links"]:
+                with ThreadPoolExecutor(max_workers=3) as executor:
+                    future_to_pdf = {executor.submit(fetch_single_pdf, url): url for url in result["pdf_links"]}
+                    for future in as_completed(future_to_pdf):
+                        pdf_content = future.result()
+                        if pdf_content.get("success"):
+                            result["pdf_contents"].append(pdf_content)
+                            logger.info(f"Extracted PDF content: {pdf_content['url']} ({len(pdf_content.get('content', ''))} chars)")
+            
+        except Exception as e:
+            logger.warning(f"Failed to fetch disclosure page {page_url}: {e}")
+        
+        return result
+
+    def _fetch_pdf_content(self, url: str, max_length: int = 20000) -> Dict[str, Any]:
+        """Fetch and extract text content from a PDF file"""
+        try:
+            import io
+            try:
+                import PyPDF2
+            except ImportError:
+                # Try alternative PDF library
+                try:
+                    import pdfplumber
+                    response = self.session.get(url, timeout=60, verify=False)
+                    response.raise_for_status()
+                    pdf_file = io.BytesIO(response.content)
+                    text_parts = []
+                    with pdfplumber.open(pdf_file) as pdf:
+                        for page in pdf.pages[:30]:  # Limit to 30 pages
+                            page_text = page.extract_text()
+                            if page_text:
+                                text_parts.append(page_text)
+                    text = "\n".join(text_parts)
+                    if len(text) > max_length:
+                        text = text[:max_length] + "..."
+                    return {
+                        "url": url,
+                        "title": f"PDF: {url.split('/')[-1]}",
+                        "content": text,
+                        "success": True
+                    }
+                except ImportError:
+                    return {"url": url, "content": "", "error": "No PDF library available (install PyPDF2 or pdfplumber)", "success": False}
+            
+            # Use PyPDF2
+            response = self.session.get(url, timeout=60, verify=False)
+            response.raise_for_status()
+            pdf_file = io.BytesIO(response.content)
+            pdf_reader = PyPDF2.PdfReader(pdf_file)
+            
+            text_parts = []
+            for page_num in range(min(len(pdf_reader.pages), 30)):  # Limit to 30 pages
+                page = pdf_reader.pages[page_num]
+                text_parts.append(page.extract_text())
+            
+            text = "\n".join(text_parts)
+            text = re.sub(r'\s+', ' ', text)
+            
             if len(text) > max_length:
                 text = text[:max_length] + "..."
             
             return {
                 "url": url,
-                "title": soup.title.string if soup.title else "",
+                "title": f"PDF: {url.split('/')[-1]}",
                 "content": text,
                 "success": True
             }
             
         except Exception as e:
-            logger.warning(f"Failed to fetch {url}: {e}")
+            logger.warning(f"Failed to fetch PDF {url}: {e}")
             return {"url": url, "content": "", "error": str(e), "success": False}
+
+    def fetch_webpage_content(self, url: str, max_length: int = 20000, retry_count: int = 2) -> Dict[str, Any]:
+        """Fetch and extract text content from a webpage with retry logic"""
+        for attempt in range(retry_count):
+            try:
+                # Handle PDF files
+                if url.lower().endswith('.pdf'):
+                    return self._fetch_pdf_content(url, max_length)
+                
+                # Increased timeout and disabled SSL verification
+                response = self.session.get(url, timeout=30, allow_redirects=True, verify=False)
+                response.raise_for_status()
+                
+                # Parse HTML
+                soup = BeautifulSoup(response.text, 'html.parser')
+                
+                # Remove script, style elements
+                for script in soup(["script", "style", "nav", "footer", "header", "aside"]):
+                    script.decompose()
+                
+                # Get text
+                text = soup.get_text(separator=' ', strip=True)
+                
+                # Clean up whitespace
+                text = re.sub(r'\s+', ' ', text)
+                
+                # Truncate if too long
+                if len(text) > max_length:
+                    text = text[:max_length] + "..."
+                
+                return {
+                    "url": url,
+                    "title": soup.title.string if soup.title else "",
+                    "content": text,
+                    "success": True
+                }
+                
+            except Exception as e:
+                if attempt < retry_count - 1:
+                    time.sleep(1)  # Wait before retry
+                    continue
+                logger.warning(f"Failed to fetch {url} after {retry_count} attempts: {e}")
+                return {"url": url, "content": "", "error": str(e), "success": False}
 
     def fetch_wikipedia_content(self, college_name: str) -> Dict[str, Any]:
         """Fetch Wikipedia content using Wikipedia API"""
@@ -730,6 +920,8 @@ class CollegeKPIAuditor:
         all_data = {
             "official_website": [],
             "official_website_content": [],
+            "public_disclosure": [],
+            "public_disclosure_content": [],
             "nirf": [],
             "wikipedia": [],
             "wikipedia_content": "",
@@ -780,59 +972,115 @@ class CollegeKPIAuditor:
         if progress_callback:
             await progress_callback("Searching Official College Website...", 15)
         
-        # Search for official website pages with specific KPI-related content
+        # Consolidated search queries for speed
         official_queries = [
-            f'site:.ac.in OR site:.edu.in "{clean_name}" official',
-            f'"{clean_name}" official website placements 2024 2025',
-            f'"{clean_name}" official faculty members PhD',
-            f'"{clean_name}" official admission fee structure',
-            f'"{clean_name}" official infrastructure facilities',
-            f'"{clean_name}" official hostel accommodation',
-            f'"{clean_name}" official courses programs offered',
+            f'site:.ac.in OR site:.edu.in "{clean_name}" official placements faculty',
+            f'"{clean_name}" official courses fees infrastructure hostel',
+            f'"{clean_name}" placement statistics 2024 2025',
         ]
         
         if abbreviation:
-            official_queries.extend([
-                f'site:.ac.in OR site:.edu.in "{abbreviation}" official',
-                f'"{abbreviation}" placements 2024 highest package',
-            ])
+            official_queries.append(f'site:.ac.in OR site:.edu.in "{abbreviation}" official')
         
         official_urls_to_fetch = set()
         
-        for idx, query in enumerate(official_queries):
-            if progress_callback:
-                await progress_callback(f"Searching Official Website ({idx+1}/{len(official_queries)})...", 15 + int((idx / len(official_queries)) * 20))
-            
-            result = self.search_official_sources(query, num_results=5)
-            if result.get("official_results"):
-                for r in result["official_results"]:
-                    if r['source_type'] == "Official College Website":
-                        all_data["official_website"].append(r)
-                        combined_text_parts.append(f"[OFFICIAL WEBSITE SEARCH]\nTitle: {r['title']}\nURL: {r['url']}\nSnippet: {r['snippet']}\n")
-                        # Collect URLs for content fetching
-                        if r['url'] and not r['url'].lower().endswith('.pdf'):
-                            official_urls_to_fetch.add(r['url'])
-            
-            await asyncio.sleep(0.2)
+        # Execute searches in parallel using ThreadPoolExecutor
+        def run_search(query):
+            return self.search_official_sources(query, num_results=8)
         
-        # Fetch actual content from top official website pages
+        with ThreadPoolExecutor(max_workers=4) as executor:
+            future_to_query = {executor.submit(run_search, q): q for q in official_queries}
+            for future in as_completed(future_to_query):
+                result = future.result()
+                if result.get("official_results"):
+                    for r in result["official_results"]:
+                        if r['source_type'] == "Official College Website":
+                            all_data["official_website"].append(r)
+                            combined_text_parts.append(f"[OFFICIAL WEBSITE SEARCH]\nTitle: {r['title']}\nURL: {r['url']}\nSnippet: {r['snippet']}\n")
+                            if r['url'] and not r['url'].lower().endswith('.pdf'):
+                                official_urls_to_fetch.add(r['url'])
+        
+        if progress_callback:
+            await progress_callback(f"Official website search complete", 35)
+        
+        # Fetch content from top official pages in parallel
         if progress_callback:
             await progress_callback("Fetching official website content...", 40)
         
-        urls_to_fetch = list(official_urls_to_fetch)[:5]  # Limit to top 5 URLs
-        for idx, url in enumerate(urls_to_fetch):
-            if url in all_data["fetched_urls"]:
-                continue
+        urls_to_fetch = [u for u in list(official_urls_to_fetch)[:8] if u not in all_data["fetched_urls"]]
+        
+        def fetch_url(url):
             try:
-                page_content = self.fetch_webpage_content(url, max_length=12000)
-                if page_content.get("success") and page_content.get("content"):
+                return self.fetch_webpage_content(url, max_length=10000)
+            except Exception as e:
+                logger.warning(f"Failed to fetch {url}: {e}")
+                return None
+        
+        with ThreadPoolExecutor(max_workers=6) as executor:
+            future_to_url = {executor.submit(fetch_url, url): url for url in urls_to_fetch}
+            for future in as_completed(future_to_url):
+                url = future_to_url[future]
+                page_content = future.result()
+                if page_content and page_content.get("success") and page_content.get("content"):
                     all_data["official_website_content"].append(page_content)
                     all_data["fetched_urls"].add(url)
                     combined_text_parts.append(f"[OFFICIAL WEBSITE PAGE CONTENT]\nURL: {url}\nTitle: {page_content.get('title', '')}\nContent: {page_content['content']}\n")
                     logger.info(f"Fetched official page: {url} ({len(page_content['content'])} chars)")
-            except Exception as e:
-                logger.warning(f"Failed to fetch {url}: {e}")
-            await asyncio.sleep(0.3)
+        
+        # ============ PRIORITY 2.5: MANDATORY PUBLIC DISCLOSURE (AICTE/UGC) ============
+        if progress_callback:
+            await progress_callback("Searching Mandatory Public Disclosure pages...", 45)
+        
+        # Search for public disclosure pages and PDFs
+        disclosure_data = self.search_public_disclosure(clean_name, abbreviation)
+        
+        # Process disclosure pages - these contain standardized KPI data
+        disclosure_pages_to_fetch = []
+        for page in disclosure_data.get("pages", [])[:4]:
+            all_data["public_disclosure"].append(page)
+            disclosure_pages_to_fetch.append(page['url'])
+            combined_text_parts.append(f"[PUBLIC DISCLOSURE PAGE]\nTitle: {page['title']}\nURL: {page['url']}\nSnippet: {page['snippet']}\n")
+        
+        # Fetch disclosure pages and extract PDFs from them
+        if disclosure_pages_to_fetch:
+            if progress_callback:
+                await progress_callback("Fetching Public Disclosure pages and PDFs...", 48)
+            
+            def fetch_disclosure_with_pdfs(page_url):
+                return self.fetch_disclosure_page_and_pdfs(page_url, max_pdfs=2)
+            
+            with ThreadPoolExecutor(max_workers=4) as executor:
+                future_to_page = {executor.submit(fetch_disclosure_with_pdfs, url): url for url in disclosure_pages_to_fetch[:3]}
+                for future in as_completed(future_to_page):
+                    page_url = future_to_page[future]
+                    result = future.result()
+                    
+                    # Add page content
+                    if result.get("page_content") and result["page_content"].get("success"):
+                        all_data["public_disclosure_content"].append(result["page_content"])
+                        all_data["fetched_urls"].add(page_url)
+                        combined_text_parts.append(f"[PUBLIC DISCLOSURE PAGE CONTENT]\nURL: {page_url}\nTitle: {result['page_content'].get('title', '')}\nContent: {result['page_content']['content']}\n")
+                        logger.info(f"Fetched disclosure page: {page_url}")
+                    
+                    # Add PDF contents - these are gold for KPIs
+                    for pdf_content in result.get("pdf_contents", []):
+                        all_data["public_disclosure_content"].append(pdf_content)
+                        combined_text_parts.append(f"[PUBLIC DISCLOSURE PDF - HIGH VALUE KPI DATA]\nURL: {pdf_content['url']}\nTitle: {pdf_content.get('title', 'PDF Document')}\nContent: {pdf_content['content']}\n")
+                        logger.info(f"Extracted disclosure PDF: {pdf_content['url']} ({len(pdf_content.get('content', ''))} chars)")
+        
+        # Also directly fetch any PDFs found in search results
+        for pdf in disclosure_data.get("pdfs", [])[:3]:
+            if pdf['url'] not in all_data["fetched_urls"]:
+                pdf_content = self._fetch_pdf_content(pdf['url'], max_length=25000)
+                if pdf_content.get("success"):
+                    all_data["public_disclosure_content"].append(pdf_content)
+                    all_data["fetched_urls"].add(pdf['url'])
+                    combined_text_parts.append(f"[PUBLIC DISCLOSURE PDF - DIRECT]\nURL: {pdf['url']}\nTitle: {pdf.get('title', 'PDF')}\nContent: {pdf_content['content']}\n")
+                    logger.info(f"Fetched direct disclosure PDF: {pdf['url']}")
+        
+        if progress_callback:
+            disclosure_count = len(all_data.get("public_disclosure_content", []))
+            await progress_callback(f"Public Disclosure complete: {disclosure_count} documents fetched", 52)
         
         # ============ PRIORITY 3: NIRF DATA ============
         if progress_callback:
@@ -840,78 +1088,62 @@ class CollegeKPIAuditor:
         
         nirf_queries = [
             f'site:nirfindia.org "{clean_name}"',
-            f'"{clean_name}" NIRF 2024 ranking',
-            f'"{clean_name}" NIRF placement statistics median salary',
-            f'"{clean_name}" NIRF faculty PhD students',
+            f'"{clean_name}" NIRF 2024 ranking placement median salary',
         ]
-        
         if abbreviation:
-            nirf_queries.extend([
-                f'site:nirfindia.org "{abbreviation}"',
-                f'"{abbreviation}" NIRF 2024 engineering ranking',
-            ])
+            nirf_queries.append(f'site:nirfindia.org "{abbreviation}"')
         
-        for idx, query in enumerate(nirf_queries):
-            if progress_callback:
-                await progress_callback(f"Searching NIRF ({idx+1}/{len(nirf_queries)})...", 55 + int((idx / len(nirf_queries)) * 15))
-            
-            result = self.search_official_sources(query, num_results=8)
-            if result.get("official_results"):
-                for r in result["official_results"]:
-                    if r['source_type'] == "NIRF" or 'nirf' in r['url'].lower():
-                        all_data["nirf"].append(r)
-                        combined_text_parts.append(f"[NIRF]\nTitle: {r['title']}\nURL: {r['url']}\nData: {r['snippet']}\n")
-            
-            await asyncio.sleep(0.2)
+        # Parallel NIRF search
+        with ThreadPoolExecutor(max_workers=3) as executor:
+            future_to_query = {executor.submit(run_search, q): q for q in nirf_queries}
+            for future in as_completed(future_to_query):
+                result = future.result()
+                if result.get("official_results"):
+                    for r in result["official_results"]:
+                        if r['source_type'] == "NIRF" or 'nirf' in r['url'].lower():
+                            all_data["nirf"].append(r)
+                            combined_text_parts.append(f"[NIRF]\nTitle: {r['title']}\nURL: {r['url']}\nData: {r['snippet']}\n")
         
         # ============ PRIORITY 4: NAAC DOCUMENTS ============
         if progress_callback:
-            await progress_callback("Searching NAAC Documents...", 75)
+            await progress_callback("Searching NAAC Documents...", 65)
         
-        naac_queries = [
-            f'site:naac.gov.in "{clean_name}"',
-            f'"{clean_name}" NAAC accreditation grade SSR',
-        ]
+        naac_query = f'site:naac.gov.in "{clean_name}" OR "{clean_name}" NAAC accreditation'
+        result = self.search_official_sources(naac_query, num_results=5)
+        if result.get("official_results"):
+            for r in result["official_results"]:
+                if 'naac' in r['url'].lower():
+                    all_data["naac"].append(r)
+                    combined_text_parts.append(f"[NAAC]\nTitle: {r['title']}\nURL: {r['url']}\nData: {r['snippet']}\n")
         
-        for idx, query in enumerate(naac_queries):
-            if progress_callback:
-                await progress_callback(f"Searching NAAC ({idx+1}/{len(naac_queries)})...", 75 + int((idx / len(naac_queries)) * 10))
-            
-            result = self.search_official_sources(query, num_results=5)
-            if result.get("official_results"):
-                for r in result["official_results"]:
-                    if 'naac' in r['url'].lower():
-                        all_data["naac"].append(r)
-                        combined_text_parts.append(f"[NAAC]\nTitle: {r['title']}\nURL: {r['url']}\nData: {r['snippet']}\n")
-            
-            await asyncio.sleep(0.2)
-        
-        # ============ PRIORITY 5: PER-KPI TARGETED SEARCH ============
+        # ============ PRIORITY 5: PER-KPI TARGETED SEARCH (PARALLEL) ============
         if progress_callback:
-            await progress_callback("Searching for specific KPI data...", 85)
+            await progress_callback("Searching for specific KPI data (parallel)...", 70)
         
         all_data["kpi_specific_data"] = {}
         
-        # Search for each KPI individually with its specific keywords
-        for idx, kpi in enumerate(self.kpis_data):
-            if progress_callback and idx % 5 == 0:
-                progress = 85 + int((idx / len(self.kpis_data)) * 10)
-                await progress_callback(f"Searching KPI {idx+1}/{len(self.kpis_data)}: {kpi['name'][:30]}...", min(progress, 95))
-            
-            kpi_search_data = self.search_for_kpi(clean_name, kpi, abbreviation)
-            all_data["kpi_specific_data"][kpi['name']] = kpi_search_data
-            
-            # Add to combined text
-            if kpi_search_data["search_results"]:
-                combined_text_parts.append(f"\n[KPI-SPECIFIC: {kpi['name']}]")
-                for r in kpi_search_data["search_results"][:3]:
-                    combined_text_parts.append(f"  Source: {r['url']}\n  Snippet: {r['snippet']}")
-            
-            if kpi_search_data["fetched_content"]:
-                for content in kpi_search_data["fetched_content"]:
-                    combined_text_parts.append(f"  [Fetched Page for {kpi['name']}]\n  URL: {content['url']}\n  Content: {content['content'][:3000]}")
-            
-            await asyncio.sleep(0.1)
+        # Search KPIs in parallel batches
+        def search_single_kpi(kpi):
+            return (kpi['name'], self.search_for_kpi(clean_name, kpi, abbreviation))
+        
+        with ThreadPoolExecutor(max_workers=8) as executor:
+            future_to_kpi = {executor.submit(search_single_kpi, kpi): kpi for kpi in self.kpis_data}
+            for future in as_completed(future_to_kpi):
+                kpi_name, kpi_search_data = future.result()
+                all_data["kpi_specific_data"][kpi_name] = kpi_search_data
+                
+                # Add to combined text
+                if kpi_search_data["search_results"]:
+                    combined_text_parts.append(f"\n[KPI-SPECIFIC: {kpi_name}]")
+                    for r in kpi_search_data["search_results"][:2]:
+                        combined_text_parts.append(f"  Source: {r['url']}\n  Snippet: {r['snippet']}")
+                
+                if kpi_search_data["fetched_content"]:
+                    for content in kpi_search_data["fetched_content"][:1]:
+                        combined_text_parts.append(f"  [Fetched Page for {kpi_name}]\n  URL: {content['url']}\n  Content: {content['content'][:2000]}")
+        
+        if progress_callback:
+            await progress_callback(f"KPI-specific search complete", 85)
         
         all_data["combined_text"] = "\n\n".join(combined_text_parts)
         
@@ -919,11 +1151,11 @@ class CollegeKPIAuditor:
         all_data["fetched_urls"] = list(all_data["fetched_urls"])
         
         if progress_callback:
-            total_sources = len(all_data["official_website"]) + len(all_data["nirf"]) + len(all_data["wikipedia"]) + len(all_data["naac"])
+            total_sources = len(all_data["official_website"]) + len(all_data["nirf"]) + len(all_data["wikipedia"]) + len(all_data["naac"]) + len(all_data["public_disclosure"])
             content_pages = len(all_data["official_website_content"])
-            wiki_len = len(all_data.get("wikipedia_content", ""))
+            disclosure_docs = len(all_data.get("public_disclosure_content", []))
             kpi_sources = sum(len(v.get("search_results", [])) for v in all_data.get("kpi_specific_data", {}).values())
-            await progress_callback(f"Data collection complete. {total_sources} general sources, {kpi_sources} KPI-specific sources, {content_pages} pages fetched", 98)
+            await progress_callback(f"Data collection complete. {total_sources} sources, {disclosure_docs} disclosure docs, {content_pages} pages fetched", 98)
         
         return all_data
 
@@ -993,6 +1225,16 @@ class CollegeKPIAuditor:
         
         # Build structured data from official sources - prioritize FULL content
         source_sections = []
+        
+        # PRIORITY 0 (HIGHEST): PUBLIC DISCLOSURE PAGES AND PDFs (AICTE Mandatory Data)
+        if search_data.get("public_disclosure_content"):
+            source_sections.append("=== MANDATORY PUBLIC DISCLOSURE (HIGHEST PRIORITY - AICTE/UGC VERIFIED DATA) ===")
+            source_sections.append("NOTE: This data is from mandatory disclosure documents required by AICTE/UGC. It contains verified KPIs.")
+            for item in search_data["public_disclosure_content"][:6]:
+                source_sections.append(f"Document URL: {item.get('url', '')}")
+                source_sections.append(f"Document Title: {item.get('title', '')}")
+                source_sections.append(f"Content:\n{item.get('content', '')[:12000]}")
+                source_sections.append("")
         
         # PRIORITY 1: Wikipedia FULL article content (most reliable for general info)
         if search_data.get("wikipedia_content"):
@@ -1086,26 +1328,31 @@ class CollegeKPIAuditor:
         
         kpi_list_str = "\n".join(kpi_details)
         
-        prompt = f"""You are a data extraction expert specializing in Indian educational institutions. Extract PRECISE data for the following college KPIs.
+        prompt = f"""You are an expert data extraction specialist for Indian educational institutions with 100% accuracy requirements. Your task is to extract PRECISE KPI data with MAXIMUM coverage.
 
 COLLEGE NAME: "{college_name}"
 
-IMPORTANT: For each KPI, there is dedicated "KPI-SPECIFIC DATA" section in the source data below. Use that section primarily to find the value.
-
-EXTRACTION RULES - FOLLOW STRICTLY:
-1. Extract data ONLY from the official sources provided below
-2. Use EXACT values as mentioned in the source text - do not approximate or estimate
-3. Include the EXACT source URL where you found the data
-4. If data is NOT explicitly found in the sources, return "Data Not Found"
-5. DO NOT invent, estimate, or hallucinate any values
-6. For numbers: extract the exact number mentioned (e.g., "85%" stays as "85%", "₹12 LPA" stays as "12 LPA")
-7. For boolean KPIs: only set true if explicitly confirmed, false if explicitly denied, null if not mentioned
+CRITICAL INSTRUCTIONS FOR 100% ACCURACY:
+1. READ ALL SOURCE DATA THOROUGHLY - Data may appear in ANY section
+2. Extract EXACT values - numbers, percentages, lists as-is from source
+3. For EACH KPI, check ALL data sections: Wikipedia, Official Website Content, Search Snippets, and KPI-Specific Data
+4. Use INFERENCE when direct data is not available but can be calculated or derived from available information
+5. For boolean fields: Set TRUE if confirmed, FALSE if explicitly denied, null ONLY if completely absent
+6. NEVER return "Data Not Found" if ANY relevant information exists in the source data
+7. Include EXACT source URL and evidence quote for traceability
 8. Confidence levels:
-   - "high": Data from Wikipedia full article or official college website fetched content
-   - "medium": Data from search snippets of official sources or NIRF
-   - "low": Data uncertain or from NAAC/limited sources
+   - "high": Exact data from official content or Wikipedia full article
+   - "medium": Derived or inferred from snippets/partial data
+   - "low": Educated estimate from contextual information
 
-=== OFFICIAL SOURCE DATA (READ CAREFULLY) ===
+DATA EXTRACTION STRATEGIES BY KPI TYPE:
+- Numbers (students, faculty, fees): Look for exact counts, statistics, tables
+- Boolean (infrastructure, facilities): Look for mentions, descriptions, facility lists
+- Lists (courses, clubs): Extract from menus, program pages, listings
+- Salaries/Packages: Check placement reports, NIRF data, news snippets
+- Rankings: Check NIRF, Wikipedia infobox, official announcements
+
+=== OFFICIAL SOURCE DATA (READ EVERY SECTION) ===
 {search_content}
 === END OF SOURCE DATA ===
 
@@ -1113,27 +1360,41 @@ EXTRACTION RULES - FOLLOW STRICTLY:
 {kpi_list_str}
 === END KPIs ===
 
-OUTPUT FORMAT - Return ONLY valid JSON array, no markdown code blocks:
+EXTRACTION EXAMPLES:
+Example 1 - Infrastructure:
+If source says "The college has smart classrooms with projectors and LMS system"
+→ ICT-Enabled Learning Infrastructure: true, confidence: high
+
+Example 2 - Numbers from context:
+If source says "We have 15 departments with an average of 50 faculty per department"
+→ Total Faculty: 750 (calculated: 15*50), confidence: medium
+
+Example 3 - Lists from descriptions:
+If source mentions "Our clubs include coding, robotics, music and drama societies"
+→ Active Clubs: ["Coding Club", "Robotics Club", "Music Society", "Drama Society"], confidence: high
+
+OUTPUT FORMAT - Return ONLY valid JSON array:
 [
   {{
-    "kpi_name": "exact KPI name from the list above",
-    "category": "category from the list above",
-    "value": "extracted value (use exact format from source) OR 'Data Not Found'",
-    "evidence_quote": "exact phrase/sentence from source that contains this data OR 'Not found in official sources'",
-    "source_url": "the URL from the source data where this was found OR 'N/A'",
-    "source_type": "Wikipedia/Official College Website/NIRF/NAAC",
+    "kpi_name": "exact KPI name from list",
+    "category": "category from list",
+    "value": "extracted/derived value OR 'Data Not Found' only if truly absent",
+    "evidence_quote": "exact quote or calculation explanation",
+    "source_url": "URL where found OR 'N/A'",
+    "source_type": "Wikipedia/Official College Website/NIRF/NAAC/Derived",
     "confidence": "high/medium/low"
   }}
 ]
 
-Now extract all {len(kpis_batch)} KPIs based on the source data above:"""
+MANDATORY: Extract ALL {len(kpis_batch)} KPIs. Use inference and context clues. Return complete JSON now:"""
 
         try:
             response = model.generate_content(
                 prompt,
                 generation_config={
-                    "temperature": 0.05,  # Low for precision
+                    "temperature": 0.1,  # Slightly increased for better inference (was 0.05)
                     "top_p": 0.95,
+                    "top_k": 40,
                     "max_output_tokens": 8192
                 }
             )
@@ -1247,9 +1508,9 @@ Now extract all {len(kpis_batch)} KPIs based on the source data above:"""
         if progress_callback:
             await progress_callback(f"Found {total_sources} official sources. Extracting KPIs...", 90)
         
-        # Step 2: Extract KPIs in batches
+        # Step 2: Extract KPIs in batches of 8 for speed
         all_results = []
-        batch_size = 5
+        batch_size = 8  # Increased to 8 for faster extraction
         total_kpis = len(self.kpis_data)
         
         for i in range(0, total_kpis, batch_size):
@@ -1266,7 +1527,7 @@ Now extract all {len(kpis_batch)} KPIs based on the source data above:"""
             )
             all_results.extend(batch_results)
             
-            await asyncio.sleep(0.5)
+            await asyncio.sleep(0.1)  # Minimal delay between batches
         
         if progress_callback:
             await progress_callback("Audit complete!", 100)
