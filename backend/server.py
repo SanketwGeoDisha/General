@@ -1885,10 +1885,15 @@ MANDATORY: Extract ALL {len(kpis_batch)} KPIs. Use inference and context clues. 
                         try:
                             llm_val = float(str(current_value).replace(',', '').replace('₹', '').replace('Rs', ''))
                             # If values are within 20% of each other, boost confidence
-                            if abs(llm_val - structured_value) / max(llm_val, structured_value) < 0.2:
+                            max_val = max(llm_val, structured_value)
+                            if max_val > 0 and abs(llm_val - structured_value) / max_val < 0.2:
                                 result["confidence"] = "high"
                                 result["evidence_quote"] += f" [Cross-verified: {structured_value}]"
-                        except (ValueError, TypeError):
+                            elif max_val == 0 and llm_val == structured_value:
+                                # Both are zero, they match exactly
+                                result["confidence"] = "high"
+                                result["evidence_quote"] += f" [Cross-verified: {structured_value}]"
+                        except (ValueError, TypeError, ZeroDivisionError):
                             pass
             
             # Validate URL is from official source

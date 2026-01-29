@@ -1,7 +1,8 @@
 {
   "metadata": {
-    "schema_version": "2.1",
+    "schema_version": "2.2",
     "created_date": "2025-01-23",
+    "updated_date": "2026-01-29",
     "description": "College KPI extraction schema with keywords for accurate data retrieval",
     "total_kpis": 25,
     "categories": [
@@ -21,298 +22,312 @@
       "field": "ict_enabled_learning_infrastructure",
       "display_name": "ICT-Enabled Learning Infrastructure",
       "category": "Infrastructure",
-      "keywords": ["ICT", "smart classroom", "digital classroom", "LMS", "learning management system", "virtual lab", "online learning", "e-learning", "technology enabled", "digital tools"],
+      "keywords": ["ICT", "smart classroom", "digital classroom", "LMS", "learning management system", "virtual lab", "online learning", "e-learning", "technology enabled", "digital tools", "Moodle", "Canvas", "Blackboard", "Google Classroom", "projector enabled", "interactive board", "computer aided learning", "CAL"],
       "data_type": "boolean",
-      "extraction_instruction": "Check for mention of digital learning tools, smart classrooms, or learning management systems",
+      "extraction_instruction": "Set TRUE if any of these are mentioned: smart classrooms, LMS platforms (Moodle, Canvas, Blackboard), virtual labs, e-learning infrastructure. Set FALSE only if explicitly stated as unavailable. Set NULL if no mention found. Do NOT confuse with general computer labs.",
       "validation": ["true", "false", "null"],
       "source_url": "",
-      "notes": "Look for specific technology mentions, not just general computer labs"
+      "notes": "Look for specific technology mentions like 'smart classrooms', 'LMS', platform names. General 'computer lab' alone is NOT sufficient."
     },
     {
       "field": "digital_library_access",
       "display_name": "Digital Library Access",
       "category": "Infrastructure",
-      "keywords": ["digital library", "e-library", "online library", "e-resources", "e-journals", "digital resources", "online databases", "e-books", "digital access", "virtual library"],
+      "keywords": ["digital library", "e-library", "online library", "e-resources", "e-journals", "digital resources", "online databases", "e-books", "digital access", "virtual library", "DELNET", "NDL", "NPTEL", "IEEE Xplore", "Springer", "Elsevier", "ScienceDirect", "J-Gate", "ProQuest", "EBSCO", "Shodhganga", "N-LIST"],
       "data_type": "boolean",
-      "extraction_instruction": "Check for digital or online library services availability",
+      "extraction_instruction": "Set TRUE if digital library services or subscriptions to e-resources (DELNET, NDL, IEEE, Springer, etc.) are mentioned. Set FALSE only if explicitly stated as unavailable. Set NULL if unclear.",
       "validation": ["true", "false", "null"],
       "source_url": "",
-      "notes": "Should include mention of specific digital resources or platforms"
+      "notes": "Look for specific platform names: DELNET, NDL, IEEE Xplore, Springer, N-LIST, Shodhganga"
     },
     {
       "field": "male_hostels_college_managed",
       "display_name": "Male Hostels Managed by College",
       "category": "Infrastructure",
-      "keywords": ["boys hostel", "men's hostel", "male hostel", "hostel for boys", "boys accommodation", "men accommodation", "hostel facilities boys"],
+      "keywords": ["boys hostel", "men's hostel", "male hostel", "hostel for boys", "boys accommodation", "men accommodation", "hostel facilities boys", "gents hostel", "boys residential", "male residential facility", "hostel blocks for boys", "boys hostel capacity"],
       "data_type": "integer",
       "unit": "count",
-      "extraction_instruction": "Count of hostel facilities specifically for male students that are college-managed",
-      "validation": ">=0",
+      "extraction_instruction": "Extract the NUMBER of separate hostel buildings/blocks for male students managed by the college. Look for phrases like '3 boys hostels' or 'three hostels for male students'. If only capacity (beds/seats) is mentioned without building count, set NULL. Do NOT count private hostels.",
+      "validation": ">=0 or null",
       "source_url": "",
-      "notes": "Only count those explicitly stated as managed/operated by the college"
+      "notes": "Count buildings/blocks, not beds or capacity. Only college-managed hostels count."
     },
     {
       "field": "female_hostels_college_managed",
       "display_name": "Female Hostels Managed by College",
       "category": "Infrastructure",
-      "keywords": ["girls hostel", "women's hostel", "female hostel", "hostel for girls", "ladies hostel", "women accommodation", "hostel facilities girls"],
+      "keywords": ["girls hostel", "women's hostel", "female hostel", "hostel for girls", "ladies hostel", "women accommodation", "hostel facilities girls", "girls residential", "female residential facility", "hostel blocks for girls", "girls hostel capacity"],
       "data_type": "integer",
       "unit": "count",
-      "extraction_instruction": "Count of hostel facilities specifically for female students that are college-managed",
-      "validation": ">=0",
+      "extraction_instruction": "Extract the NUMBER of separate hostel buildings/blocks for female students managed by the college. Look for phrases like '2 girls hostels' or 'two hostels for female students'. If only capacity (beds/seats) is mentioned without building count, set NULL. Do NOT count private hostels.",
+      "validation": ">=0 or null",
       "source_url": "",
-      "notes": "Only count those explicitly stated as managed/operated by the college"
+      "notes": "Count buildings/blocks, not beds or capacity. Only college-managed hostels count."
     },
     {
       "field": "smart_campus_erp_implementation",
       "display_name": "Smart Campus / ERP Implementation",
       "category": "Infrastructure",
-      "keywords": ["smart campus", "ERP", "enterprise system", "campus management", "student portal", "digital campus", "automated system", "campus automation", "management system"],
+      "keywords": ["smart campus", "ERP", "enterprise resource planning", "campus management system", "student portal", "digital campus", "automated system", "campus automation", "SAP", "Oracle", "Tally", "student information system", "SIS", "online fee payment", "attendance automation", "biometric attendance", "campus app", "mobile app"],
       "data_type": "boolean",
-      "extraction_instruction": "Check for enterprise systems, campus management software, or smart campus initiatives",
+      "extraction_instruction": "Set TRUE if any ERP system, campus management software, student portal, or smart campus initiative is mentioned. Look for system names (SAP, Oracle) or features like 'online fee payment', 'biometric attendance', 'student portal'. Set FALSE only if explicitly unavailable. Set NULL if unclear.",
       "validation": ["true", "false", "null"],
       "source_url": "",
-      "notes": "Look for specific system names or digital campus initiatives"
+      "notes": "Look for specific system names or digital automation features"
     },
     {
       "field": "courses_list",
       "display_name": "List of Courses",
       "category": "Academics",
-      "keywords": ["programs offered", "courses", "academic programs", "degree programs", "departments", "UG programs", "PG programs", "bachelor of", "master of", "B.Tech", "M.Tech", "MBA"],
+      "keywords": ["programs offered", "courses", "academic programs", "degree programs", "departments", "UG programs", "PG programs", "bachelor of", "master of", "B.Tech", "M.Tech", "MBA", "BBA", "B.Sc", "M.Sc", "B.Com", "M.Com", "BCA", "MCA", "B.E.", "M.E.", "PhD", "diploma", "undergraduate", "postgraduate", "specializations"],
       "data_type": "array",
-      "extraction_instruction": "Extract all program/course names mentioned, including specializations",
-      "validation": "array of strings",
+      "extraction_instruction": "Extract ALL program/course names as an array of strings. Include full names with specializations (e.g., 'B.Tech in Computer Science Engineering'). Format: ['B.Tech CSE', 'B.Tech ECE', 'MBA', ...]. Include UG, PG, and PhD programs.",
+      "validation": "array of strings, non-empty",
       "source_url": "",
-      "notes": "Include full program names with durations if available"
+      "notes": "Use standard abbreviations. Include specializations/branches if mentioned."
     },
     {
       "field": "course_fees",
       "display_name": "Fees for Each Course",
       "category": "Academics",
-      "keywords": ["fee structure", "tuition fee", "course fee", "annual fee", "fee details", "program fee", "cost of study", "fee per annum", "fee breakdown"],
+      "keywords": ["fee structure", "tuition fee", "course fee", "annual fee", "fee details", "program fee", "cost of study", "fee per annum", "fee breakdown", "semester fee", "yearly fee", "fee for admission", "academic fee"],
       "data_type": "object",
-      "unit": "INR",
-      "extraction_instruction": "Map course names to their annual tuition fees in INR",
-      "validation": "key-value pairs",
+      "unit": "INR per year",
+      "extraction_instruction": "Create an object mapping course names to ANNUAL tuition fees in INR. Format: {'B.Tech CSE': 150000, 'MBA': 200000}. If semester fees are given, multiply by 2 for annual. EXCLUDE hostel, mess, transport, exam fees. If total fee is given for full program, divide by duration years.",
+      "validation": "key-value pairs with numeric values > 0",
       "source_url": "",
-      "notes": "Extract only tuition fees, exclude hostel/mess/other charges"
+      "notes": "Convert to annual fees. Exclude non-tuition charges. Use null for courses with unknown fees."
     },
     {
       "field": "total_graduate_students_2025",
       "display_name": "Total Graduate Students (2025)",
       "category": "Demographics",
-      "keywords": ["graduating students 2025", "batch of 2025", "final year students", "total graduates", "passing out batch", "graduating batch", "outgoing students"],
+      "keywords": ["graduating students 2025", "batch of 2025", "final year students", "total graduates", "passing out batch", "graduating batch", "outgoing students", "2024-25 batch", "class of 2025", "convocation 2025", "degree awarded 2025", "students graduated"],
       "data_type": "integer",
       "unit": "count",
-      "extraction_instruction": "Total number of students graduating in academic year 2024-25",
-      "validation": ">0",
+      "extraction_instruction": "Extract the total number of students graduating in academic year 2024-25 (batch of 2025). Look for 'Class of 2025', 'graduating batch 2025', or placement reports for 2024-25. If exact 2025 data unavailable, use most recent graduation data and note the year in remarks.",
+      "validation": ">0 or null",
       "source_url": "",
-      "notes": "Look for specific mention of 2025 batch or current graduating batch"
+      "notes": "Includes all UG and PG graduating students. May be found in placement reports or convocation data."
     },
     {
       "field": "placed_students_count",
       "display_name": "Placed Students Count",
       "category": "Placements",
-      "keywords": ["placement statistics", "students placed", "placement record", "campus placement", "job offers", "placement percentage", "placed students", "recruitment"],
+      "keywords": ["placement statistics", "students placed", "placement record", "campus placement", "job offers", "placement percentage", "placed students", "recruitment", "offers received", "placed through campus", "selected students", "employment offers"],
       "data_type": "integer",
       "unit": "count",
-      "extraction_instruction": "Number of students who received job offers through campus placements",
-      "validation": ">=0",
+      "extraction_instruction": "Extract the NUMBER of students who received job offers through campus placements. Use latest available placement season data. If only percentage is given, calculate: (percentage × total_graduate_students) / 100. Do NOT include internship offers unless specified as PPOs (Pre-Placement Offers).",
+      "validation": ">=0 and <= total_graduate_students",
       "source_url": "",
-      "notes": "Should be from latest placement season, exclude pre-placement offers if specified"
+      "notes": "Use latest placement season. Include PPOs. Exclude off-campus placements unless included in official data."
     },
     {
       "field": "max_compensation",
       "display_name": "Maximum Compensation",
       "category": "Placements",
-      "keywords": ["highest package", "maximum salary", "top salary", "highest CTC", "peak package", "best offer", "top offer", "maximum compensation"],
+      "keywords": ["highest package", "maximum salary", "top salary", "highest CTC", "peak package", "best offer", "top offer", "maximum compensation", "highest annual package", "record package", "maximum CTC offered", "top recruiter package"],
       "data_type": "float",
-      "unit": "INR per annum",
-      "extraction_instruction": "Highest annual compensation offered in latest placement season",
+      "unit": "INR per annum (LPA)",
+      "extraction_instruction": "Extract the HIGHEST annual CTC (Cost to Company) offered in the latest placement season. Convert LPA to full amount (e.g., 45 LPA = 4500000). If monthly salary is mentioned, multiply by 12. Include international offers converted to INR if mentioned.",
       "validation": ">0",
       "source_url": "",
-      "notes": "Convert to annual if monthly mentioned (multiply by 12)"
+      "notes": "Always use CTC (Cost to Company), not in-hand salary. Convert LPA format to full rupees."
     },
     {
       "field": "median_compensation",
       "display_name": "Median Compensation",
       "category": "Placements",
-      "keywords": ["median salary", "average package", "median CTC", "median compensation", "average salary", "median package", "average CTC"],
+      "keywords": ["median salary", "median package", "median CTC", "median compensation", "50th percentile salary", "middle salary"],
       "data_type": "float",
-      "unit": "INR per annum",
-      "extraction_instruction": "Median annual compensation of placed students from latest batch",
-      "validation": ">0",
+      "unit": "INR per annum (LPA)",
+      "extraction_instruction": "Extract the MEDIAN (50th percentile) annual CTC of placed students. IMPORTANT: Median is NOT the same as average/mean. If only average is available and median is not mentioned, set NULL. Convert LPA to full amount.",
+      "validation": ">0 or null",
       "source_url": "",
-      "notes": "Different from average/mean, look specifically for 'median'"
+      "notes": "STRICTLY median only, NOT average. If only average is available, do not use it here. Many colleges report average, which is different from median."
+    },
+    {
+      "field": "average_compensation",
+      "display_name": "Average Compensation",
+      "category": "Placements",
+      "keywords": ["average salary", "average package", "average CTC", "mean salary", "mean package", "mean CTC", "avg package", "average compensation"],
+      "data_type": "float",
+      "unit": "INR per annum (LPA)",
+      "extraction_instruction": "Extract the AVERAGE (mean) annual CTC of placed students. This is different from median. Convert LPA to full amount. If only median is available and average is not mentioned, set NULL.",
+      "validation": ">0 or null",
+      "source_url": "",
+      "notes": "STRICTLY average/mean only, NOT median."
     },
     {
       "field": "students_higher_education",
       "display_name": "Students Pursuing Higher Education",
       "category": "Placements",
-      "keywords": ["higher studies", "pursuing masters", "MS/MBA", "further education", "postgraduate studies", "higher education", "studies abroad", "higher degrees"],
+      "keywords": ["higher studies", "pursuing masters", "MS/MBA", "further education", "postgraduate studies", "higher education", "studies abroad", "higher degrees", "GRE", "GMAT", "CAT", "GATE qualified", "foreign universities", "abroad for studies", "MS in USA", "pursuing PhD"],
       "data_type": "integer",
       "unit": "count",
-      "extraction_instruction": "Number of graduating students who enrolled in Masters/PhD programs after graduation",
+      "extraction_instruction": "Extract the number of graduating students who opted for higher education (Masters/PhD) instead of placements. Include both domestic (IITs, IIMs, etc.) and international (MS abroad) admissions. May be found in placement reports under 'higher studies' section.",
       "validation": ">=0",
       "source_url": "",
-      "notes": "Includes both domestic and international higher education"
+      "notes": "Includes MS, MBA, PhD admissions. Often reported alongside placement data."
     },
     {
       "field": "patents_last_year",
-      "display_name": "Patents Granted/Licensed (Latest Year)",
+      "display_name": "Patents Granted/Filed (Latest Year)",
       "category": "Research",
-      "keywords": ["patents", "patents granted", "patents filed", "intellectual property", "patent licensing", "innovation", "patents published", "IPR"],
+      "keywords": ["patents", "patents granted", "patents filed", "intellectual property", "patent licensing", "innovation", "patents published", "IPR", "patent applications", "patents awarded", "patent count", "Indian patent", "USPTO", "technology transfer"],
       "data_type": "integer",
       "unit": "count",
-      "extraction_instruction": "Number of patents granted or licensed in latest academic year",
+      "extraction_instruction": "Extract the number of patents GRANTED (preferred) or FILED in the latest academic year. Prioritize 'granted' over 'filed' if both are available. Specify in notes whether it's granted or filed. Check NIRF data, annual reports.",
       "validation": ">=0",
       "source_url": "",
-      "notes": "Look for year-specific patent data, prefer granted over filed"
+      "notes": "Prefer granted patents. Note whether filed or granted. Include both faculty and student patents."
     },
     {
       "field": "entrance_exam",
       "display_name": "Primary Entrance Exam",
       "category": "Admissions",
-      "keywords": ["admission through", "entrance exam", "selection process", "eligibility criteria", "admission criteria", "entrance test", "admission test"],
+      "keywords": ["admission through", "entrance exam", "selection process", "eligibility criteria", "admission criteria", "entrance test", "admission test", "JEE Main", "JEE Advanced", "NEET", "COMEDK", "KCET", "MHT-CET", "WBJEE", "BITSAT", "VITEEE", "SRMJEEE", "CAT", "MAT", "XAT", "GATE"],
       "data_type": "string",
-      "extraction_instruction": "Main entrance examination for undergraduate admissions",
-      "validation": "string",
+      "extraction_instruction": "Extract the PRIMARY entrance exam name for undergraduate admissions (e.g., 'JEE Main', 'KCET', 'COMEDK'). If multiple exams are accepted, list the main one first. For PG programs, mention separately if significant (e.g., 'GATE for M.Tech').",
+      "validation": "string, common exam names",
       "source_url": "",
-      "notes": "e.g., JEE Main, NEET, CET, COMEDK, etc."
+      "notes": "Common exams: JEE Main, JEE Advanced, NEET, COMEDK, KCET, MHT-CET, WBJEE, BITSAT, CAT, GATE"
     },
     {
       "field": "entrance_cutoffs",
       "display_name": "Entrance Exam Cutoffs by Program",
       "category": "Admissions",
-      "keywords": ["cutoff", "cut-off marks", "qualifying marks", "minimum marks", "percentile required", "closing rank", "cutoff rank", "qualifying percentile"],
+      "keywords": ["cutoff", "cut-off marks", "qualifying marks", "minimum marks", "percentile required", "closing rank", "cutoff rank", "qualifying percentile", "opening rank", "last rank admitted", "cutoff 2024", "cutoff 2025"],
       "data_type": "object",
-      "extraction_instruction": "Course-wise cutoff scores/percentiles for latest admission cycle",
-      "validation": "key-value pairs",
+      "extraction_instruction": "Create an object mapping course names to cutoff values. Format: {'B.Tech CSE': 15000, 'B.Tech ECE': 25000} for ranks OR {'B.Tech CSE': 95.5} for percentiles. Specify in notes whether values are ranks or percentiles. Use latest admission cycle data.",
+      "validation": "key-value pairs with numeric values",
       "source_url": "",
-      "notes": "Extract as numbers (percentiles or ranks)"
+      "notes": "Specify if values are ranks (lower is better) or percentiles (higher is better). Use latest year's cutoffs."
     },
     {
       "field": "total_students_enrolled",
       "display_name": "Total Students Enrolled",
       "category": "Demographics",
-      "keywords": ["total students", "student strength", "enrollment", "student population", "total intake", "student body", "campus population"],
+      "keywords": ["total students", "student strength", "enrollment", "student population", "total intake", "student body", "campus population", "student headcount", "total enrollment", "students on roll", "registered students"],
       "data_type": "integer",
       "unit": "count",
-      "extraction_instruction": "Total student enrollment across all programs and academic years",
+      "extraction_instruction": "Extract the TOTAL student enrollment across ALL programs (UG, PG, PhD) and ALL academic years combined. This is the current total headcount, not just new admissions. Check NIRF data or annual reports for accurate figures.",
       "validation": ">0",
       "source_url": "",
-      "notes": "Current academic year total"
+      "notes": "Include all years and all programs. Different from annual intake which is only new admissions."
     },
     {
       "field": "female_students",
       "display_name": "Female Students Enrolled",
       "category": "Demographics",
-      "keywords": ["female students", "girl students", "women students", "gender ratio", "female enrollment", "women enrollment", "girls enrollment"],
+      "keywords": ["female students", "girl students", "women students", "gender ratio", "female enrollment", "women enrollment", "girls enrollment", "female percentage", "women percentage", "female student count"],
       "data_type": "integer",
       "unit": "count",
-      "extraction_instruction": "Count of female students currently enrolled",
-      "validation": ">=0",
+      "extraction_instruction": "Extract the COUNT of female students currently enrolled. If only percentage/ratio is given, calculate: (female_percentage × total_students_enrolled) / 100. Round to nearest integer.",
+      "validation": ">=0 and <= total_students_enrolled",
       "source_url": "",
-      "notes": "Extract actual count, not percentage"
+      "notes": "Extract actual count. If percentage given (e.g., '30% female'), calculate from total enrollment."
     },
     {
       "field": "total_faculty",
       "display_name": "Total Faculty",
       "category": "Faculty",
-      "keywords": ["faculty members", "teaching staff", "professors", "faculty strength", "academic staff", "teaching faculty", "faculty count"],
+      "keywords": ["faculty members", "teaching staff", "professors", "faculty strength", "academic staff", "teaching faculty", "faculty count", "permanent faculty", "regular faculty", "full-time faculty", "sanctioned faculty"],
       "data_type": "integer",
       "unit": "count",
-      "extraction_instruction": "Total number of full-time faculty members",
+      "extraction_instruction": "Extract the total number of FULL-TIME/REGULAR faculty members. EXCLUDE visiting faculty, adjunct professors, guest lecturers unless they are counted in official strength. Check NIRF data or NAAC reports.",
       "validation": ">0",
       "source_url": "",
-      "notes": "Regular faculty only, exclude visiting/adjunct if specified"
+      "notes": "Only permanent/regular faculty. Exclude visiting/guest faculty unless specified otherwise."
     },
     {
       "field": "phd_faculty",
       "display_name": "PhD Faculty",
       "category": "Faculty",
-      "keywords": ["PhD faculty", "doctorate faculty", "faculty with PhD", "PhD qualified", "doctoral degree", "PhD holders", "doctorate holders"],
+      "keywords": ["PhD faculty", "doctorate faculty", "faculty with PhD", "PhD qualified", "doctoral degree", "PhD holders", "doctorate holders", "faculty qualifications", "faculty with doctoral degree"],
       "data_type": "integer",
       "unit": "count",
-      "extraction_instruction": "Number of faculty members with PhD qualifications",
-      "validation": ">=0",
+      "extraction_instruction": "Extract the number of faculty members who have COMPLETED PhD degrees. Do not count those 'pursuing PhD'. If percentage is given, calculate from total_faculty. Check NAAC or NIRF reports.",
+      "validation": ">=0 and <= total_faculty",
       "source_url": "",
-      "notes": "Count of faculty with completed PhD degrees"
+      "notes": "Only completed PhDs count. 'Pursuing PhD' should NOT be included."
     },
     {
       "field": "avg_teaching_experience",
       "display_name": "Average Teaching Experience",
       "category": "Faculty",
-      "keywords": ["teaching experience", "faculty experience", "years of experience", "average experience", "experience of faculty", "faculty tenure"],
+      "keywords": ["teaching experience", "faculty experience", "years of experience", "average experience", "experience of faculty", "faculty tenure", "years in teaching", "industry and teaching experience"],
       "data_type": "float",
       "unit": "years",
-      "extraction_instruction": "Average years of teaching experience across all faculty",
-      "validation": ">0",
+      "extraction_instruction": "Extract the AVERAGE years of teaching experience across all faculty. Look for specific numbers like '12.5 years average experience'. If only a range is given (e.g., '10-15 years'), use midpoint. If individual experiences listed, calculate average.",
+      "validation": ">0 or null",
       "source_url": "",
-      "notes": "Look for specific average number, not ranges"
+      "notes": "Teaching experience only, not industry experience unless combined."
     },
     {
       "field": "sports_infrastructure",
       "display_name": "Sports Infrastructure & Achievements",
       "category": "Campus Life",
-      "keywords": ["sports facilities", "playground", "gymnasium", "sports achievements", "tournaments won", "sports complex", "athletic facilities", "sports ground"],
+      "keywords": ["sports facilities", "playground", "gymnasium", "sports achievements", "tournaments won", "sports complex", "athletic facilities", "sports ground", "stadium", "swimming pool", "indoor games", "outdoor games", "cricket ground", "football field", "basketball court", "tennis court", "badminton court", "fitness center"],
       "data_type": "object",
-      "extraction_instruction": "Extract sports facilities list and notable achievements",
-      "validation": {"facilities": "array", "achievements": "array"},
+      "extraction_instruction": "Extract as object with two arrays: 'facilities' (list of sports facilities) and 'achievements' (notable sports achievements/wins). Format: {'facilities': ['Cricket Ground', 'Gymnasium', 'Swimming Pool'], 'achievements': ['Inter-University Champions 2024']}",
+      "validation": {"facilities": "array of strings", "achievements": "array of strings"},
       "source_url": "",
-      "notes": "Separate facilities and achievements into different arrays"
+      "notes": "Separate facilities from achievements. Include both indoor and outdoor facilities."
     },
     {
       "field": "active_clubs",
       "display_name": "Active Student Clubs",
       "category": "Campus Life",
-      "keywords": ["student clubs", "clubs and societies", "extra-curricular", "student activities", "cultural clubs", "technical clubs", "student organizations"],
+      "keywords": ["student clubs", "clubs and societies", "extra-curricular", "student activities", "cultural clubs", "technical clubs", "student organizations", "student chapters", "IEEE student branch", "ACM chapter", "NSS", "NCC", "rotaract", "literary club", "music club", "dance club", "coding club", "robotics club"],
       "data_type": "array",
-      "extraction_instruction": "List of currently active student clubs and societies",
+      "extraction_instruction": "Extract an array of currently active student club/society names. Include technical clubs (Coding Club, Robotics), cultural clubs (Music, Drama), professional chapters (IEEE, ACM), and service clubs (NSS, NCC, Rotaract).",
       "validation": "array of strings",
       "source_url": "",
-      "notes": "Extract club names as mentioned"
+      "notes": "Include all types: technical, cultural, professional chapters, service organizations."
     },
     {
       "field": "nirf_ranking",
       "display_name": "NIRF Ranking",
       "category": "Ranking",
-      "keywords": ["NIRF", "national ranking", "ranking", "NIRF rank", "MHRD ranking", "institute ranking", "NIRF 2024", "national institutional ranking"],
+      "keywords": ["NIRF", "national ranking", "ranking", "NIRF rank", "MHRD ranking", "institute ranking", "NIRF 2024", "NIRF 2025", "national institutional ranking", "engineering ranking", "overall ranking", "NIRF band"],
       "data_type": "string",
-      "extraction_instruction": "Latest NIRF ranking band or specific rank",
-      "validation": ["1-50", "51-100", "101-150", "151-200", "201+", "Not Ranked", "specific rank"],
+      "extraction_instruction": "Extract the latest NIRF ranking. If specific rank available, use format 'Rank 45' or just '45'. If only band available, use format '51-100' or '101-150'. If not ranked, use 'Not Ranked'. Specify category (Engineering/Overall/University) if mentioned.",
+      "validation": ["specific rank number", "rank band (1-50, 51-100, etc.)", "Not Ranked"],
       "source_url": "",
-      "notes": "Prefer band format if specific rank not available"
+      "notes": "Use most recent NIRF data. Note the category (Engineering, Overall, University, Management)."
     },
     {
       "field": "institutional_status",
       "display_name": "Institutional Status",
       "category": "Ranking",
-      "keywords": ["autonomous", "deemed university", "affiliated to", "private university", "institute status", "college status", "affiliation"],
+      "keywords": ["autonomous", "deemed university", "affiliated to", "private university", "institute status", "college status", "affiliation", "state university", "central university", "UGC recognized", "AICTE approved", "NBA accredited", "NAAC grade", "autonomous college"],
       "data_type": "string",
-      "extraction_instruction": "Current institutional affiliation/status",
-      "validation": ["Autonomous", "Deemed University", "Private University", "Affiliated College"],
+      "extraction_instruction": "Extract the institutional status. Common values: 'Autonomous College', 'Deemed to be University', 'Private University', 'State University', 'Central University', 'Affiliated College (to XYZ University)'. Include affiliating university name if applicable.",
+      "validation": ["Autonomous", "Deemed University", "Private University", "State University", "Central University", "Affiliated College"],
       "source_url": "",
-      "notes": "Extract exact status as mentioned"
+      "notes": "Include affiliating university name for affiliated colleges."
     },
     {
       "field": "phd_students_enrolled",
       "display_name": "PhD Students Enrolled",
       "category": "Demographics",
-      "keywords": ["PhD scholars", "doctoral students", "research scholars", "PhD program", "PhD candidates", "doctoral candidates", "research students"],
+      "keywords": ["PhD scholars", "doctoral students", "research scholars", "PhD program", "PhD candidates", "doctoral candidates", "research students", "PhD enrollment", "doctoral enrollment", "research scholar count", "PhD admissions"],
       "data_type": "integer",
       "unit": "count",
-      "extraction_instruction": "Total number of students currently enrolled in PhD programs",
+      "extraction_instruction": "Extract the total number of students currently enrolled in PhD/doctoral programs across all departments. Look in NIRF data, research section, or academic reports. Different from 'PhD faculty' which refers to faculty with PhD degrees.",
       "validation": ">=0",
       "source_url": "",
-      "notes": "Current PhD enrollment across all departments"
+      "notes": "Current PhD students, not PhD completions or PhD faculty. Check NIRF for accurate data."
     }
   ],
   "extraction_rules": {
-    "currency_conversion": "Convert all monetary values to annual INR",
-    "null_handling": "Use null for missing information, not 0 or false",
-    "year_preference": "Use latest available data (2024-25 preferred)",
-    "multiple_sources": "Prioritize official college website over third-party sources",
-    "data_recency": "Prefer current academic year data over historical"
+    "currency_conversion": "Convert all monetary values to annual INR. 1 LPA = 100000 INR. Monthly × 12 = Annual.",
+    "null_handling": "Use null for missing/unknown information. NEVER use 0 or false for unknown values.",
+    "year_preference": "Use latest available data (2024-25 or 2025-26 preferred). Note the actual year in remarks if different.",
+    "multiple_sources": "Priority order: 1) Official college website, 2) NIRF data, 3) NAAC reports, 4) Verified third-party sources",
+    "data_recency": "Prefer current academic year data. If using older data, note the year.",
+    "percentage_to_count": "When percentage given, calculate count using: (percentage × total) / 100, round to nearest integer",
+    "lpa_conversion": "LPA (Lakhs Per Annum): 1 LPA = 100,000 INR. Example: 45 LPA = 4,500,000 INR"
   }
 }
