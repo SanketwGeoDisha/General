@@ -138,13 +138,13 @@ KPI_SCHEMA = {
             "field_name": "courses_list",
             "display_name": "List of Courses",
             "category": "Academic Programs",
-            "data_type": "array",
-            "unit": "names",
-            "validation_rules": "array of strings",
-            "extraction_instruction": "Array containing names of all courses/programs offered. Extract full program names.",
-            "example_value": ["Computer Science Engineering", "Mechanical Engineering", "MBA"],
+            "data_type": "string",
+            "unit": "formatted list",
+            "validation_rules": "string with grouped courses",
+            "extraction_instruction": "List all courses in compact format: Group by degree type with specializations in parentheses. Format: 'B.Tech(CSE, ECE, ME), M.Tech(VLSI, AI), MBA, BBA, Ph.D'. Use standard abbreviations (CSE=Computer Science, ECE=Electronics, ME=Mechanical, EE=Electrical, CE=Civil, etc). Separate degree types with commas.",
+            "example_value": "B.Tech(CSE, ECE, ME, EE, CE), M.Tech(CSE, VLSI), MBA, Ph.D",
             "remarks_required": False,
-            "search_keywords": ["courses offered", "programs offered", "academic programs", "B.Tech", "M.Tech", "MBA", "departments", "branches"]
+            "search_keywords": ["courses offered", "programs offered", "academic programs", "B.Tech", "M.Tech", "MBA", "departments", "branches", "specializations"]
         },
         {
             "field_name": "course_fees",
@@ -186,11 +186,11 @@ KPI_SCHEMA = {
             "field_name": "max_compensation_last_season",
             "display_name": "Maximum Compensation (Last Placement Season)",
             "category": "Placements",
-            "data_type": "float",
-            "unit": "INR per annum",
-            "validation_rules": "positive number",
-            "extraction_instruction": "Highest annual compensation offered to any student in last placement season.",
-            "example_value": 4200000.00,
+            "data_type": "string",
+            "unit": "LPA or Cr",
+            "validation_rules": "formatted string with LPA or Cr suffix",
+            "extraction_instruction": "Highest annual compensation offered to any student in last placement season. Format: If below 1 Crore (< 1,00,00,000), show as 'X.XX LPA' (e.g., '42 LPA', '8.5 LPA'). If 1 Crore or above, show as 'X.XX Cr' (e.g., '1.2 Cr', '2.1 Cr'). Always include the unit suffix.",
+            "example_value": "42 LPA",
             "remarks_required": False,
             "search_keywords": ["highest package", "maximum salary", "top CTC", "highest CTC", "best package", "maximum compensation", "highest offer"]
         },
@@ -198,11 +198,11 @@ KPI_SCHEMA = {
             "field_name": "median_compensation_last_batch",
             "display_name": "Median Compensation (Last Batch)",
             "category": "Placements",
-            "data_type": "float",
-            "unit": "INR per annum",
-            "validation_rules": "positive number",
-            "extraction_instruction": "Median annual compensation offered to placed students from last graduating batch.",
-            "example_value": 850000.00,
+            "data_type": "string",
+            "unit": "LPA or Cr",
+            "validation_rules": "formatted string with LPA or Cr suffix",
+            "extraction_instruction": "Median annual compensation offered to placed students from last graduating batch. Format: If below 1 Crore (< 1,00,00,000), show as 'X.XX LPA' (e.g., '8.5 LPA', '12 LPA'). If 1 Crore or above, show as 'X.XX Cr' (e.g., '1.2 Cr'). Always include the unit suffix.",
+            "example_value": "8.5 LPA",
             "remarks_required": False,
             "search_keywords": ["median salary", "median package", "median CTC", "average package", "average salary", "mean compensation"]
         },
@@ -213,10 +213,10 @@ KPI_SCHEMA = {
             "data_type": "integer",
             "unit": "count",
             "validation_rules": "positive integer",
-            "extraction_instruction": "Number of graduating students who enrolled in higher education (Masters/PhD) after graduation.",
+            "extraction_instruction": "Number of graduating students who enrolled in higher education (Masters/PhD) after graduation. Extract from NIRF data under 'Students admitted to higher studies' or 'Metric 5.2' section.",
             "example_value": 150,
             "remarks_required": False,
-            "search_keywords": ["higher studies", "pursuing masters", "MS abroad", "PhD admission", "higher education", "postgraduate studies"]
+            "search_keywords": ["NIRF higher studies", "students admitted to higher studies", "pursuing masters", "MS abroad", "PhD admission", "higher education", "postgraduate studies", "NIRF metric 5.2", "nirfindia.org higher education"]
         },
         {
             "field_name": "ip_patents_last_year",
@@ -339,16 +339,16 @@ KPI_SCHEMA = {
             "search_keywords": ["student clubs", "clubs and societies", "student activities", "cultural clubs", "technical clubs", "student organizations"]
         },
         {
-            "field_name": "nirf_ranking_band",
-            "display_name": "NIRF Ranking Band",
+            "field_name": "nirf_ranking",
+            "display_name": "NIRF Ranking",
             "category": "Accreditations & Rankings",
             "data_type": "string",
-            "unit": "rank band",
-            "validation_rules": "string from predefined bands",
-            "extraction_instruction": "NIRF ranking band (e.g., '1-50', '51-100', '101-150', '151-200', '201+', 'Not Ranked').",
-            "example_value": "51-100",
+            "unit": "rank",
+            "validation_rules": "exact rank number or band string",
+            "extraction_instruction": "NIRF ranking from nirfindia.org. If exact rank is available (e.g., '1', '5', '23'), show the exact number. If only band is available (e.g., '51-100', '101-150', '151-200', '201+'), show the band. Prefer exact rank over band. Use 'Not Ranked' if not in NIRF.",
+            "example_value": "5",
             "remarks_required": False,
-            "search_keywords": ["NIRF ranking", "NIRF 2024", "national ranking", "NIRF rank", "engineering ranking", "MHRD ranking"]
+            "search_keywords": ["NIRF ranking", "NIRF 2024", "NIRF 2025", "national ranking", "NIRF rank", "nirfindia.org", "India Rankings", "engineering ranking"]
         },
         {
             "field_name": "institutional_status",
@@ -425,7 +425,6 @@ class OfficialSourceValidator:
     OFFICIAL_PATTERNS = {
         'nirf': ['nirfindia.org', 'nirf.org'],
         'naac': ['naac.gov.in', 'assessmentonline.naac.gov.in'],
-        'wikipedia': ['wikipedia.org', 'en.wikipedia.org'],
         'government': ['.gov.in', '.nic.in', '.ac.in', '.edu.in'],
         'aicte': ['aicte-india.org', 'facilities.aicte-india.org'],
         'ugc': ['ugc.ac.in', 'ugc.gov.in'],
@@ -485,17 +484,13 @@ class OfficialSourceValidator:
         if '.ac.in' in url_lower or '.edu.in' in url_lower:
             return 2
         
-        # Priority 3: Wikipedia
-        if 'wikipedia' in url_lower:
+        # Priority 3: NAAC
+        if 'naac' in url_lower:
             return 3
         
-        # Priority 4: NAAC
-        if 'naac' in url_lower:
-            return 4
-        
-        # Priority 5: Other government
+        # Priority 4: Other government
         if '.gov.in' in url_lower or '.nic.in' in url_lower:
-            return 5
+            return 4
         
         return 100
     
@@ -1210,8 +1205,6 @@ class CollegeKPIAuditor:
             return "NIRF"
         elif 'naac' in url_lower:
             return "NAAC"
-        elif 'wikipedia' in url_lower:
-            return "Wikipedia"
         elif '.ac.in' in url_lower or '.edu.in' in url_lower:
             return "Official College Website"
         elif 'aicte' in url_lower:
@@ -1226,8 +1219,8 @@ class CollegeKPIAuditor:
     async def gather_official_data(self, college_name: str, progress_callback=None) -> Dict[str, Any]:
         """
         Gather data ONLY from official sources with ACTUAL page content:
-        1. Wikipedia (full article content)
-        2. Official College Website (fetched content)
+        1. Official College Website (fetched content)
+        2. Public Disclosure (AICTE/UGC)
         3. NIRF Search Results
         4. NAAC Documents
         """
@@ -1239,8 +1232,6 @@ class CollegeKPIAuditor:
             "public_disclosure": [],
             "public_disclosure_content": [],
             "nirf": [],
-            "wikipedia": [],
-            "wikipedia_content": "",
             "naac": [],
             "combined_text": "",
             "fetched_urls": set()
@@ -1254,39 +1245,9 @@ class CollegeKPIAuditor:
         
         combined_text_parts = []
         
-        # ============ PRIORITY 1: WIKIPEDIA (Full Content) ============
+        # ============ PRIORITY 1: OFFICIAL COLLEGE WEBSITE ============
         if progress_callback:
-            await progress_callback("Fetching Wikipedia content...", 5)
-        
-        wiki_data = self.fetch_wikipedia_content(clean_name)
-        if wiki_data.get("success"):
-            all_data["wikipedia_content"] = wiki_data["content"]
-            all_data["wikipedia"].append({
-                "title": wiki_data.get("title", clean_name),
-                "url": wiki_data.get("url", ""),
-                "snippet": wiki_data.get("content", "")[:500],
-                "priority": 1,
-                "source_type": "Wikipedia"
-            })
-            combined_text_parts.append(f"[WIKIPEDIA FULL ARTICLE]\nURL: {wiki_data.get('url', '')}\n{wiki_data['content']}\n")
-            logger.info(f"Fetched Wikipedia content: {len(wiki_data['content'])} chars")
-        elif abbreviation:
-            # Try with abbreviation
-            wiki_data = self.fetch_wikipedia_content(abbreviation)
-            if wiki_data.get("success"):
-                all_data["wikipedia_content"] = wiki_data["content"]
-                all_data["wikipedia"].append({
-                    "title": wiki_data.get("title", abbreviation),
-                    "url": wiki_data.get("url", ""),
-                    "snippet": wiki_data.get("content", "")[:500],
-                    "priority": 1,
-                    "source_type": "Wikipedia"
-                })
-                combined_text_parts.append(f"[WIKIPEDIA FULL ARTICLE]\nURL: {wiki_data.get('url', '')}\n{wiki_data['content']}\n")
-        
-        # ============ PRIORITY 2: OFFICIAL COLLEGE WEBSITE ============
-        if progress_callback:
-            await progress_callback("Searching Official College Website...", 15)
+            await progress_callback("Searching Official College Website...", 5)
         
         # Consolidated search queries for speed
         official_queries = [
@@ -1469,7 +1430,7 @@ class CollegeKPIAuditor:
         all_data["fetched_urls"] = list(all_data["fetched_urls"])
         
         if progress_callback:
-            total_sources = len(all_data["official_website"]) + len(all_data["nirf"]) + len(all_data["wikipedia"]) + len(all_data["naac"]) + len(all_data["public_disclosure"])
+            total_sources = len(all_data["official_website"]) + len(all_data["nirf"]) + len(all_data["naac"]) + len(all_data["public_disclosure"])
             content_pages = len(all_data["official_website_content"])
             disclosure_docs = len(all_data.get("public_disclosure_content", []))
             kpi_sources = sum(len(v.get("search_results", [])) for v in all_data.get("kpi_specific_data", {}).values())
@@ -1561,15 +1522,7 @@ class CollegeKPIAuditor:
                 source_sections.append(f"Content:\n{item.get('content', '')[:12000]}")
                 source_sections.append("")
         
-        # PRIORITY 1: Wikipedia FULL article content (most reliable for general info)
-        if search_data.get("wikipedia_content"):
-            wiki_url = search_data["wikipedia"][0]["url"] if search_data.get("wikipedia") else "https://en.wikipedia.org"
-            source_sections.append("=== WIKIPEDIA FULL ARTICLE (HIGH PRIORITY - VERIFIED CONTENT) ===")
-            source_sections.append(f"Source URL: {wiki_url}")
-            source_sections.append(f"Content:\n{search_data['wikipedia_content'][:20000]}")
-            source_sections.append("")
-        
-        # PRIORITY 2: Fetched Official Website Content
+        # PRIORITY 1: Fetched Official Website Content
         if search_data.get("official_website_content"):
             source_sections.append("=== OFFICIAL COLLEGE WEBSITE - FETCHED PAGES (HIGH PRIORITY) ===")
             for item in search_data["official_website_content"][:5]:
@@ -1615,15 +1568,6 @@ class CollegeKPIAuditor:
                 source_sections.append(f"Title: {item['title']}")
                 source_sections.append(f"URL: {item['url']}")
                 source_sections.append(f"Data: {item['snippet']}")
-                source_sections.append("")
-        
-        # PRIORITY 6: Wikipedia search snippets (if no full content)
-        if search_data.get("wikipedia") and not search_data.get("wikipedia_content"):
-            source_sections.append("=== WIKIPEDIA SEARCH RESULTS ===")
-            for item in search_data["wikipedia"][:5]:
-                source_sections.append(f"Title: {item['title']}")
-                source_sections.append(f"URL: {item['url']}")
-                source_sections.append(f"Content: {item['snippet']}")
                 source_sections.append("")
         
         if search_data.get("naac"):
@@ -1673,7 +1617,7 @@ AGGRESSIVE EXTRACTION: Find data even from indirect mentions. "Data Not Found" i
    a) Public Disclosure PDFs (AICTE mandated - highest trust)
    b) NIRF data (government verified)
    c) Official website content
-   d) Wikipedia (community verified)
+   d) NAAC documents (accreditation verified)
 
 === CONFIDENCE SCORING ===
 - "high": Direct quote with exact value from official document
@@ -1718,24 +1662,41 @@ OUTPUT FORMAT - Return ONLY valid JSON array (no markdown, no explanation):
     "value": "extracted/derived value OR 'Data Not Found' only if truly absent",
     "evidence_quote": "exact quote or calculation explanation",
     "source_url": "URL where found OR 'N/A'",
-    "source_type": "Wikipedia/Official College Website/NIRF/NAAC/Public Disclosure/Derived",
+    "source_type": "Official College Website/NIRF/NAAC/AICTE/UGC/Public Disclosure/Derived",
     "confidence": "high/medium/low"
   }}
 ]
 
 MANDATORY: Extract ALL {len(kpis_batch)} KPIs. Use inference and context clues. Return ONLY the JSON array now:"""
 
+        # Define response schema for accurate KPI extraction
+        kpi_response_schema = {
+            "type": "array",
+            "items": {
+                "type": "object",
+                "properties": {
+                    "kpi_name": {"type": "string"},
+                    "category": {"type": "string"},
+                    "value": {},  # Can be string, number, boolean, array, or object
+                    "evidence_quote": {"type": "string"},
+                    "source_url": {"type": "string"},
+                    "source_type": {"type": "string"},
+                    "confidence": {"type": "string", "enum": ["high", "medium", "low"]}
+                },
+                "required": ["kpi_name", "category", "value", "evidence_quote", "source_url", "source_type", "confidence"]
+            }
+        }
+
         try:
-            # Use modern google-genai client API
+            # Use modern google-genai client API with Gemini 3 Flash
             response = client.models.generate_content(
-                model="gemini-2.0-flash",
+                model="gemini-3-flash-preview",
                 contents=prompt,
                 config=types.GenerateContentConfig(
-                    temperature=0.05,  # Low temperature for accuracy
-                    top_p=0.95,
-                    top_k=40,
-                    max_output_tokens=8192,
-                    response_mime_type="application/json"  # Request JSON response
+                    temperature=0.4,  # 0.0 is optimal for extraction accuracy
+                    response_mime_type="application/json",
+                    response_schema=kpi_response_schema,  # Schema for accuracy
+                    thinking_config=types.ThinkingConfig(thinking_budget=1024)  # Low thinking for speed
                 )
             )
             
@@ -1820,10 +1781,6 @@ MANDATORY: Extract ALL {len(kpis_batch)} KPIs. Use inference and context clues. 
         # Process all content sources
         all_content = []
         
-        # Add Wikipedia content
-        if search_data.get("wikipedia_content"):
-            all_content.append(search_data["wikipedia_content"])
-        
         # Add official website content
         for item in search_data.get("official_website_content", []):
             if item.get("content"):
@@ -1858,7 +1815,7 @@ MANDATORY: Extract ALL {len(kpis_batch)} KPIs. Use inference and context clues. 
             "Total Faculty": "total_faculty",
             "PhD Faculty": "phd_faculty",
             "Total Students Enrolled": "total_students",
-            "NIRF Ranking Band": "nirf_rank",
+            "NIRF Ranking": "nirf_rank",
             "PhD Students Enrolled": "phd_students",
         }
         
@@ -1937,8 +1894,7 @@ MANDATORY: Extract ALL {len(kpis_batch)} KPIs. Use inference and context clues. 
         search_data["structured_extracted"] = structured_data
         
         total_sources = (len(search_data["official_website"]) + len(search_data["nirf"]) + 
-                        len(search_data["wikipedia"]) + len(search_data["naac"]) + 
-                        len(search_data.get("public_disclosure", [])))
+                        len(search_data["naac"]) + len(search_data.get("public_disclosure", [])))
         
         if total_sources < 2:
             return [{"kpi_name": "Error", "category": "Search", 
@@ -1996,17 +1952,6 @@ async def process_audit(audit_id: str, college_name: str):
             if audit_id in audits_store:
                 audits_store[audit_id]["progress"] = progress
                 audits_store[audit_id]["progress_message"] = message
-        
-        # Fetch Wikipedia info first for institute details
-        wiki_data = auditor.fetch_wikipedia_content(college_name)
-        if wiki_data.get("success"):
-            institute_info = auditor.extract_institute_info(college_name, wiki_data.get("content", ""))
-            institute_info["wikipedia_url"] = wiki_data.get("url", "")
-            if wiki_data.get("title"):
-                institute_info["full_name"] = wiki_data["title"]
-            # Update the audit store with institute info early
-            if audit_id in audits_store:
-                audits_store[audit_id]["institute_info"] = institute_info
         
         results = await auditor.run_audit(college_name, progress_callback)
         
@@ -2091,8 +2036,8 @@ async def get_allowed_sources():
     return {
         "allowed_sources": {
             "priority_1": "Official College Website (.ac.in, .edu.in)",
-            "priority_2": "NIRF (nirfindia.org)",
-            "priority_3": "Wikipedia (wikipedia.org)",
+            "priority_2": "Public Disclosure (AICTE/UGC Mandatory)",
+            "priority_3": "NIRF (nirfindia.org)",
             "priority_4": "NAAC (naac.gov.in)"
         },
         "blocked_sources": OfficialSourceValidator.BLOCKED_SOURCES[:10]
