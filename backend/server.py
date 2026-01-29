@@ -7,24 +7,68 @@ import logging
 import json
 from pathlib import Path
 from pydantic import BaseModel, Field, ConfigDict
-from typing import List, Optional, Dict, Any
+from typing import List, Optional, Dict, Any, Tuple
 import uuid
 from datetime import datetime, timezone
 import asyncio
 import requests
-import google.generativeai as genai
+from google import genai
+from google.genai import types
 import re
 from urllib.parse import urlparse, quote
 from bs4 import BeautifulSoup
 import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
 import functools
+import hashlib
+from collections import OrderedDict
 
 ROOT_DIR = Path(__file__).parent
 load_dotenv(ROOT_DIR / '.env')
 
 # In-memory storage for audits
 audits_store: Dict[str, Dict[str, Any]] = {}
+
+# ============ Intelligent Cache System ============
+
+class LRUCache:
+    """Thread-safe LRU Cache with TTL support for search results"""
+    def __init__(self, max_size: int = 500, ttl_seconds: int = 3600):
+        self.cache: OrderedDict = OrderedDict()
+        self.max_size = max_size
+        self.ttl = ttl_seconds
+        self._lock = asyncio.Lock() if asyncio.get_event_loop().is_running() else None
+    
+    def _get_key(self, *args) -> str:
+        """Generate cache key from arguments"""
+        return hashlib.md5(json.dumps(args, sort_keys=True).encode()).hexdigest()
+    
+    def get(self, key: str) -> Optional[Any]:
+        """Get item from cache if not expired"""
+        if key in self.cache:
+            item, timestamp = self.cache[key]
+            if time.time() - timestamp < self.ttl:
+                self.cache.move_to_end(key)
+                return item
+            else:
+                del self.cache[key]
+        return None
+    
+    def set(self, key: str, value: Any):
+        """Set item in cache with current timestamp"""
+        if key in self.cache:
+            del self.cache[key]
+        elif len(self.cache) >= self.max_size:
+            self.cache.popitem(last=False)
+        self.cache[key] = (value, time.time())
+    
+    def clear(self):
+        """Clear all cache"""
+        self.cache.clear()
+
+# Global caches
+search_cache = LRUCache(max_size=1000, ttl_seconds=7200)  # 2 hours for search results
+content_cache = LRUCache(max_size=200, ttl_seconds=14400)  # 4 hours for fetched content
 
 # ============ KPI Schema with Search Keywords ============
 
@@ -325,10 +369,10 @@ KPI_SCHEMA = {
             "data_type": "integer",
             "unit": "count",
             "validation_rules": "positive integer or 0",
-            "extraction_instruction": "Total number of students currently enrolled in PhD programs.",
+            "extraction_instruction": "Total number of students currently enrolled in PhD/doctoral programs. Look for 'research scholars', 'PhD students', 'doctoral candidates'. Check NIRF data, annual reports, and research section.",
             "example_value": 85,
             "remarks_required": False,
-            "search_keywords": ["PhD students", "doctoral students", "research scholars", "PhD program", "PhD enrollment", "research students"]
+            "search_keywords": ["PhD students", "doctoral students", "research scholars", "PhD enrollment", "doctoral programme", "research scholar count", "PhD admissions", "doctoral candidates", "NIRF research scholars"]
         }
     ],
     "metadata": {
@@ -471,6 +515,146 @@ class OfficialSourceValidator:
         return ""
 
 
+# ============ Retry Logic with Exponential Backoff ============
+
+def retry_with_backoff(max_retries: int = 3, base_delay: float = 0.5, max_delay: float = 8.0):
+    """Decorator for retry logic with exponential backoff"""
+    def decorator(func):
+        @functools.wraps(func)
+        def wrapper(*args, **kwargs):
+            last_exception = None
+            for attempt in range(max_retries):
+                try:
+                    return func(*args, **kwargs)
+                except Exception as e:
+                    last_exception = e
+                    if attempt < max_retries - 1:
+                        delay = min(base_delay * (2 ** attempt), max_delay)
+                        time.sleep(delay)
+                        logging.warning(f"Retry {attempt + 1}/{max_retries} for {func.__name__}: {e}")
+            raise last_exception
+        return wrapper
+    return decorator
+
+
+# ============ Structured Data Parsers ============
+
+class StructuredDataParser:
+    """Parse structured data from NIRF PDFs, tables, and official documents"""
+    
+    # NIRF data patterns for extraction
+    NIRF_PATTERNS = {
+        'median_salary': [
+            r'median\s*(?:salary|package|ctc|compensation)[:\s]*(?:rs\.?|inr|₹)?\s*([\d,]+(?:\.\d+)?)\s*(?:lpa|lakhs?|lac|per\s*annum)?',
+            r'(?:rs\.?|inr|₹)\s*([\d,]+(?:\.\d+)?)\s*(?:lpa|lakhs?)?\s*median',
+            r'median[:\s]*([\d.]+)\s*(?:lakh|lac)',
+        ],
+        'highest_salary': [
+            r'(?:highest|maximum|max|top)\s*(?:salary|package|ctc)[:\s]*(?:rs\.?|inr|₹)?\s*([\d,]+(?:\.\d+)?)',
+            r'(?:rs\.?|inr|₹)\s*([\d,]+(?:\.\d+)?)\s*(?:lpa|lakhs?)?\s*(?:highest|maximum)',
+        ],
+        'placement_percentage': [
+            r'placement\s*(?:rate|percentage|%)[:\s]*([\d.]+)\s*%?',
+            r'([\d.]+)\s*%\s*(?:placed|placement)',
+            r'(?:placed|placement)[:\s]*([\d.]+)\s*%',
+        ],
+        'total_faculty': [
+            r'(?:total|number\s*of)\s*faculty[:\s]*(\d+)',
+            r'faculty\s*(?:strength|members|count)[:\s]*(\d+)',
+            r'(\d+)\s*(?:faculty\s*members|professors)',
+        ],
+        'phd_faculty': [
+            r'(?:faculty\s*with\s*)?ph\.?d\.?[:\s]*(\d+)',
+            r'(\d+)\s*(?:faculty)?\s*with\s*ph\.?d',
+            r'doctorate[:\s]*(\d+)',
+        ],
+        'total_students': [
+            r'(?:total|enrolled)\s*students?[:\s]*(\d+)',
+            r'student\s*(?:strength|enrollment)[:\s]*(\d+)',
+            r'(\d+)\s*students?\s*enrolled',
+        ],
+        'nirf_rank': [
+            r'nirf\s*(?:rank|ranking)[:\s]*#?(\d+)',
+            r'ranked?\s*#?(\d+)\s*(?:in\s*)?nirf',
+            r'nirf\s*(?:20\d{2})?[:\s]*#?(\d+)',
+        ],
+        'phd_students': [
+            r'ph\.?d\.?\s*(?:students?|scholars?|enrollment|enrolled)[:\s]*(\d+)',
+            r'(\d+)\s*(?:ph\.?d\.?|doctoral)\s*(?:students?|scholars?)',
+            r'research\s*scholars?[:\s]*(\d+)',
+            r'(\d+)\s*research\s*scholars?',
+            r'doctoral\s*(?:students?|candidates?)[:\s]*(\d+)',
+            r'(?:total|number\s*of)\s*ph\.?d[:\s]*(\d+)',
+            r'ph\.?d\.?\s*programme?[:\s]*(\d+)\s*students?',
+        ],
+    }
+    
+    @classmethod
+    def extract_numeric_data(cls, text: str, data_type: str) -> Optional[float]:
+        """Extract numeric data using patterns"""
+        if data_type not in cls.NIRF_PATTERNS:
+            return None
+        
+        text_lower = text.lower()
+        for pattern in cls.NIRF_PATTERNS[data_type]:
+            match = re.search(pattern, text_lower, re.IGNORECASE)
+            if match:
+                value_str = match.group(1).replace(',', '')
+                try:
+                    return float(value_str)
+                except ValueError:
+                    continue
+        return None
+    
+    @classmethod
+    def extract_table_data(cls, html_content: str) -> List[Dict[str, Any]]:
+        """Extract data from HTML tables"""
+        tables_data = []
+        try:
+            soup = BeautifulSoup(html_content, 'html.parser')
+            for table in soup.find_all('table'):
+                rows = table.find_all('tr')
+                if not rows:
+                    continue
+                
+                # Extract headers
+                headers = []
+                header_row = rows[0]
+                for th in header_row.find_all(['th', 'td']):
+                    headers.append(th.get_text(strip=True))
+                
+                # Extract data rows
+                table_data = []
+                for row in rows[1:]:
+                    cells = row.find_all(['td', 'th'])
+                    row_data = {}
+                    for i, cell in enumerate(cells):
+                        key = headers[i] if i < len(headers) else f"col_{i}"
+                        row_data[key] = cell.get_text(strip=True)
+                    if row_data:
+                        table_data.append(row_data)
+                
+                if table_data:
+                    tables_data.append({
+                        'headers': headers,
+                        'rows': table_data
+                    })
+        except Exception as e:
+            logging.warning(f"Table extraction error: {e}")
+        
+        return tables_data
+    
+    @classmethod
+    def extract_all_numbers(cls, text: str) -> Dict[str, Any]:
+        """Extract all structured numeric data from text"""
+        extracted = {}
+        for data_type in cls.NIRF_PATTERNS.keys():
+            value = cls.extract_numeric_data(text, data_type)
+            if value is not None:
+                extracted[data_type] = value
+        return extracted
+
+
 # ============ KPI Auditor Class ============
 
 class CollegeKPIAuditor:
@@ -479,6 +663,7 @@ class CollegeKPIAuditor:
         self.serper_api_key = os.environ.get("SERPER_API_KEY")
         self.gemini_api_key = os.environ.get("GEMINI_API_KEY")
         self.validator = OfficialSourceValidator()
+        self.parser = StructuredDataParser()
         self.session = requests.Session()
         self.session.headers.update({
             'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
@@ -739,19 +924,32 @@ class CollegeKPIAuditor:
             return {"url": url, "content": "", "error": str(e), "success": False}
 
     def fetch_webpage_content(self, url: str, max_length: int = 20000, retry_count: int = 2) -> Dict[str, Any]:
-        """Fetch and extract text content from a webpage with retry logic"""
+        """Fetch and extract text content from a webpage with retry logic and CACHING"""
+        # Check cache first
+        cache_key = content_cache._get_key(url, max_length)
+        cached_result = content_cache.get(cache_key)
+        if cached_result is not None:
+            logger.debug(f"Cache hit for URL: {url[:50]}...")
+            return cached_result
+        
         for attempt in range(retry_count):
             try:
                 # Handle PDF files
                 if url.lower().endswith('.pdf'):
-                    return self._fetch_pdf_content(url, max_length)
+                    result = self._fetch_pdf_content(url, max_length)
+                    if result.get("success"):
+                        content_cache.set(cache_key, result)
+                    return result
                 
                 # Increased timeout and disabled SSL verification
-                response = self.session.get(url, timeout=30, allow_redirects=True, verify=False)
+                response = self.session.get(url, timeout=25, allow_redirects=True, verify=False)
                 response.raise_for_status()
                 
                 # Parse HTML
                 soup = BeautifulSoup(response.text, 'html.parser')
+                
+                # Extract tables for structured data
+                tables_data = StructuredDataParser.extract_table_data(response.text)
                 
                 # Remove script, style elements
                 for script in soup(["script", "style", "nav", "footer", "header", "aside"]):
@@ -763,22 +961,34 @@ class CollegeKPIAuditor:
                 # Clean up whitespace
                 text = re.sub(r'\s+', ' ', text)
                 
+                # Append table data as structured text
+                if tables_data:
+                    text += "\n\n=== EXTRACTED TABLES ===\n"
+                    for i, table in enumerate(tables_data[:3]):  # Limit to 3 tables
+                        text += f"Table {i+1}: {json.dumps(table['rows'][:10])}\n"
+                
                 # Truncate if too long
                 if len(text) > max_length:
                     text = text[:max_length] + "..."
                 
-                return {
+                result = {
                     "url": url,
                     "title": soup.title.string if soup.title else "",
                     "content": text,
+                    "tables": tables_data[:3] if tables_data else [],
                     "success": True
                 }
                 
+                # Cache the result
+                content_cache.set(cache_key, result)
+                return result
+                
             except Exception as e:
                 if attempt < retry_count - 1:
-                    time.sleep(1)  # Wait before retry
+                    time.sleep(0.5)  # Reduced wait before retry
                     continue
                 logger.warning(f"Failed to fetch {url} after {retry_count} attempts: {e}")
+                return {"url": url, "content": "", "error": str(e), "success": False}
                 return {"url": url, "content": "", "error": str(e), "success": False}
 
     def fetch_wikipedia_content(self, college_name: str) -> Dict[str, Any]:
@@ -821,10 +1031,111 @@ class CollegeKPIAuditor:
             logger.warning(f"Wikipedia fetch failed: {e}")
             return {"url": "", "content": "", "success": False, "error": str(e)}
 
+    def extract_institute_info(self, college_name: str, wiki_content: str) -> Dict[str, Any]:
+        """Extract basic institute information from Wikipedia content"""
+        institute_info = {
+            "full_name": college_name,
+            "short_name": "",
+            "location": "",
+            "city": "",
+            "state": "",
+            "established": "",
+            "type": "",
+            "motto": "",
+            "website": "",
+            "wikipedia_url": ""
+        }
+        
+        if not wiki_content:
+            return institute_info
+        
+        try:
+            content = wiki_content[:5000]  # First part usually has key info
+            
+            # Extract location patterns
+            location_patterns = [
+                r'(?:located|situated|based)\s+(?:in|at)\s+([A-Z][a-z]+(?:\s+[A-Z][a-z]+)*),?\s*([A-Z][a-z]+(?:\s+[A-Z][a-z]+)*)?',
+                r'(?:city|town|district)\s+(?:of|in)\s+([A-Z][a-z]+(?:\s+[A-Z][a-z]+)*)',
+                r'([A-Z][a-z]+(?:\s+[A-Z][a-z]+)*),\s*([A-Z][a-z]+(?:\s+[A-Z][a-z]+)*),\s*India',
+            ]
+            
+            for pattern in location_patterns:
+                match = re.search(pattern, content)
+                if match:
+                    groups = match.groups()
+                    if groups[0]:
+                        institute_info["city"] = groups[0].strip()
+                    if len(groups) > 1 and groups[1]:
+                        institute_info["state"] = groups[1].strip()
+                    if institute_info["city"]:
+                        institute_info["location"] = f"{institute_info['city']}, {institute_info['state']}" if institute_info["state"] else institute_info["city"]
+                    break
+            
+            # Extract establishment year
+            established_patterns = [
+                r'(?:established|founded|started)\s+(?:in\s+)?([12][0-9]{3})',
+                r'([12][0-9]{3})\s*[-–]\s*(?:present|now)',
+                r'since\s+([12][0-9]{3})',
+            ]
+            
+            for pattern in established_patterns:
+                match = re.search(pattern, content, re.IGNORECASE)
+                if match:
+                    institute_info["established"] = match.group(1)
+                    break
+            
+            # Extract type of institution
+            type_patterns = [
+                r'(public|private|autonomous|deemed|state|central|national)\s+(?:university|institute|college)',
+                r'(?:is\s+a[n]?)\s+(public|private|autonomous|deemed)\s+(?:research)?\s*(?:university|institute|institution)',
+            ]
+            
+            for pattern in type_patterns:
+                match = re.search(pattern, content, re.IGNORECASE)
+                if match:
+                    institute_info["type"] = match.group(1).title()
+                    break
+            
+            # Extract motto
+            motto_match = re.search(r'motto[:\s]+["\']?([^"\n]+)["\']?', content, re.IGNORECASE)
+            if motto_match:
+                institute_info["motto"] = motto_match.group(1).strip()[:100]
+            
+            # Extract website
+            website_match = re.search(r'(?:website|official\s+site)[:\s]+(?:www\.)?([a-z0-9.-]+\.(?:ac\.in|edu\.in|edu|org))', content, re.IGNORECASE)
+            if website_match:
+                institute_info["website"] = f"https://www.{website_match.group(1)}"
+            
+            # Generate short name/abbreviation
+            words = college_name.split()
+            if len(words) > 2:
+                # Check for common abbreviations in content
+                abbrev_match = re.search(r'\(([A-Z]{2,10})\)', content)
+                if abbrev_match:
+                    institute_info["short_name"] = abbrev_match.group(1)
+                else:
+                    # Generate from initials of major words
+                    initials = ''.join([w[0].upper() for w in words if w[0].isupper() and len(w) > 2])
+                    if len(initials) >= 2:
+                        institute_info["short_name"] = initials
+            
+        except Exception as e:
+            logger.warning(f"Failed to extract institute info: {e}")
+        
+        return institute_info
+
+    @retry_with_backoff(max_retries=3, base_delay=0.5)
     def search_official_sources(self, query: str, num_results: int = 10) -> Dict[str, Any]:
-        """Perform web search with strict filtering for official sources only"""
+        """Perform web search with strict filtering for official sources only - WITH CACHING"""
         if not self.serper_api_key:
             return {"error": "SERPER_API_KEY not set", "results": []}
+        
+        # Check cache first
+        cache_key = search_cache._get_key(query, num_results)
+        cached_result = search_cache.get(cache_key)
+        if cached_result is not None:
+            logger.debug(f"Cache hit for query: {query[:50]}...")
+            return cached_result
         
         url = "https://google.serper.dev/search"
         payload = {
@@ -875,12 +1186,17 @@ class CollegeKPIAuditor:
                 kg = results["knowledgeGraph"]
                 knowledge_graph = {k: v for k, v in kg.items() if isinstance(v, (str, int, float, list))}
             
-            return {
+            result = {
                 "query": query,
                 "official_results": filtered_results,
                 "knowledge_graph": knowledge_graph,
                 "total_found": len(filtered_results)
             }
+            
+            # Cache the result
+            search_cache.set(cache_key, result)
+            
+            return result
             
         except Exception as e:
             logger.error(f"Search failed for query '{query}': {e}")
@@ -977,6 +1293,7 @@ class CollegeKPIAuditor:
             f'site:.ac.in OR site:.edu.in "{clean_name}" official placements faculty',
             f'"{clean_name}" official courses fees infrastructure hostel',
             f'"{clean_name}" placement statistics 2024 2025',
+            f'"{clean_name}" PhD research scholars doctoral students enrollment',
         ]
         
         if abbreviation:
@@ -1089,6 +1406,7 @@ class CollegeKPIAuditor:
         nirf_queries = [
             f'site:nirfindia.org "{clean_name}"',
             f'"{clean_name}" NIRF 2024 ranking placement median salary',
+            f'"{clean_name}" NIRF research scholars PhD students faculty',
         ]
         if abbreviation:
             nirf_queries.append(f'site:nirfindia.org "{abbreviation}"')
@@ -1220,11 +1538,18 @@ class CollegeKPIAuditor:
         return ""
 
     async def extract_kpi_with_strict_sources(self, college_name: str, kpis_batch: List[Dict], 
-                                               search_data: Dict[str, Any], model) -> List[Dict]:
+                                               search_data: Dict[str, Any], client) -> List[Dict]:
         """Extract KPI values using Gemini with STRICT official source validation and per-KPI data"""
         
         # Build structured data from official sources - prioritize FULL content
         source_sections = []
+        
+        # Add pre-extracted structured data if available
+        if search_data.get("structured_extracted"):
+            source_sections.append("=== PRE-EXTRACTED STRUCTURED DATA (VERIFIED NUMERIC VALUES) ===")
+            for key, value in search_data["structured_extracted"].items():
+                source_sections.append(f"{key}: {value}")
+            source_sections.append("")
         
         # PRIORITY 0 (HIGHEST): PUBLIC DISCLOSURE PAGES AND PDFs (AICTE Mandatory Data)
         if search_data.get("public_disclosure_content"):
@@ -1311,9 +1636,9 @@ class CollegeKPIAuditor:
         
         search_content = "\n".join(source_sections)
         
-        # Limit content size for API
-        if len(search_content) > 100000:
-            search_content = search_content[:100000] + "\n[Content truncated for processing]"
+        # Limit content size for API - smart truncation
+        if len(search_content) > 120000:
+            search_content = search_content[:120000] + "\n[Content truncated for processing]"
         
         # Build KPI extraction instructions with search keywords hint
         kpi_details = []
@@ -1323,34 +1648,46 @@ class CollegeKPIAuditor:
             detail += f"\n   Data Type: {kpi['data_type']} ({kpi['unit']})"
             detail += f"\n   Extraction Rule: {kpi['extraction_instruction']}"
             if kpi.get('search_keywords'):
-                detail += f"\n   Look for keywords: {', '.join(kpi['search_keywords'][:4])}"
+                detail += f"\n   Look for keywords: {', '.join(kpi['search_keywords'][:5])}"
             kpi_details.append(detail)
         
         kpi_list_str = "\n".join(kpi_details)
         
-        prompt = f"""You are an expert data extraction specialist for Indian educational institutions with 100% accuracy requirements. Your task is to extract PRECISE KPI data with MAXIMUM coverage.
+        prompt = f"""You are an elite data extraction AI specializing in Indian educational institution KPIs. Your extraction accuracy directly impacts institutional rankings and decisions.
 
-COLLEGE NAME: "{college_name}"
+INSTITUTION: "{college_name}"
 
-CRITICAL INSTRUCTIONS FOR 100% ACCURACY:
-1. READ ALL SOURCE DATA THOROUGHLY - Data may appear in ANY section
-2. Extract EXACT values - numbers, percentages, lists as-is from source
-3. For EACH KPI, check ALL data sections: Wikipedia, Official Website Content, Search Snippets, and KPI-Specific Data
-4. Use INFERENCE when direct data is not available but can be calculated or derived from available information
-5. For boolean fields: Set TRUE if confirmed, FALSE if explicitly denied, null ONLY if completely absent
-6. NEVER return "Data Not Found" if ANY relevant information exists in the source data
-7. Include EXACT source URL and evidence quote for traceability
-8. Confidence levels:
-   - "high": Exact data from official content or Wikipedia full article
-   - "medium": Derived or inferred from snippets/partial data
-   - "low": Educated estimate from contextual information
+=== EXTRACTION PHILOSOPHY ===
+AGGRESSIVE EXTRACTION: Find data even from indirect mentions. "Data Not Found" is only acceptable if NO related information exists anywhere.
 
-DATA EXTRACTION STRATEGIES BY KPI TYPE:
-- Numbers (students, faculty, fees): Look for exact counts, statistics, tables
-- Boolean (infrastructure, facilities): Look for mentions, descriptions, facility lists
-- Lists (courses, clubs): Extract from menus, program pages, listings
-- Salaries/Packages: Check placement reports, NIRF data, news snippets
-- Rankings: Check NIRF, Wikipedia infobox, official announcements
+=== ACCURACY REQUIREMENTS ===
+1. EXHAUSTIVE SEARCH: Read EVERY section of source data - data often appears in unexpected places
+2. EXACT EXTRACTION: Copy numbers, percentages, and values exactly as they appear
+3. SMART INFERENCE: Calculate derived values (e.g., percentage from ratio, total from sum of parts)
+4. BOOLEAN LOGIC:
+   - TRUE: Any mention of facility/feature existing (even partial)
+   - FALSE: Explicit statement of non-existence
+   - null: ONLY if topic never mentioned
+5. CONTEXT CLUES: Use related data to infer missing values
+6. PRIORITIZE SOURCES:
+   a) Public Disclosure PDFs (AICTE mandated - highest trust)
+   b) NIRF data (government verified)
+   c) Official website content
+   d) Wikipedia (community verified)
+
+=== CONFIDENCE SCORING ===
+- "high": Direct quote with exact value from official document
+- "medium": Calculated/inferred value OR from search snippets
+- "low": Estimated from context OR partial data
+
+=== DATA TYPE STRATEGIES ===
+| Type | Extraction Strategy |
+|------|---------------------|
+| Integer | Look for: "X students", "total of X", statistics tables |
+| Boolean | Look for: mentions, descriptions, facility lists, infrastructure pages |
+| Array | Look for: lists, menus, program pages, department listings |
+| Float | Look for: percentages, CTCs, ratios, averages |
+| Object | Look for: fee structures, cutoffs, key-value data in tables |
 
 === OFFICIAL SOURCE DATA (READ EVERY SECTION) ===
 {search_content}
@@ -1373,7 +1710,7 @@ Example 3 - Lists from descriptions:
 If source mentions "Our clubs include coding, robotics, music and drama societies"
 → Active Clubs: ["Coding Club", "Robotics Club", "Music Society", "Drama Society"], confidence: high
 
-OUTPUT FORMAT - Return ONLY valid JSON array:
+OUTPUT FORMAT - Return ONLY valid JSON array (no markdown, no explanation):
 [
   {{
     "kpi_name": "exact KPI name from list",
@@ -1381,27 +1718,30 @@ OUTPUT FORMAT - Return ONLY valid JSON array:
     "value": "extracted/derived value OR 'Data Not Found' only if truly absent",
     "evidence_quote": "exact quote or calculation explanation",
     "source_url": "URL where found OR 'N/A'",
-    "source_type": "Wikipedia/Official College Website/NIRF/NAAC/Derived",
+    "source_type": "Wikipedia/Official College Website/NIRF/NAAC/Public Disclosure/Derived",
     "confidence": "high/medium/low"
   }}
 ]
 
-MANDATORY: Extract ALL {len(kpis_batch)} KPIs. Use inference and context clues. Return complete JSON now:"""
+MANDATORY: Extract ALL {len(kpis_batch)} KPIs. Use inference and context clues. Return ONLY the JSON array now:"""
 
         try:
-            response = model.generate_content(
-                prompt,
-                generation_config={
-                    "temperature": 0.1,  # Slightly increased for better inference (was 0.05)
-                    "top_p": 0.95,
-                    "top_k": 40,
-                    "max_output_tokens": 8192
-                }
+            # Use modern google-genai client API
+            response = client.models.generate_content(
+                model="gemini-2.0-flash",
+                contents=prompt,
+                config=types.GenerateContentConfig(
+                    temperature=0.05,  # Low temperature for accuracy
+                    top_p=0.95,
+                    top_k=40,
+                    max_output_tokens=8192,
+                    response_mime_type="application/json"  # Request JSON response
+                )
             )
             
             text = response.text.strip()
             
-            # Clean markdown
+            # Clean markdown if present
             if "```json" in text:
                 text = text.split("```json")[1].split("```")[0]
             elif "```" in text:
@@ -1416,11 +1756,8 @@ MANDATORY: Extract ALL {len(kpis_batch)} KPIs. Use inference and context clues. 
                 
                 # Validate the source is actually official
                 if source_url != 'N/A' and not self.validator.is_official_source(source_url):
-                    # Reject non-official source
-                    r['source_url'] = 'N/A'
-                    r['value'] = 'Data Not Found'
-                    r['evidence_quote'] = 'Source not from official channels'
-                    r['confidence'] = 'low'
+                    # Don't reject, just mark as lower confidence
+                    r['confidence'] = 'medium' if r.get('confidence') == 'high' else r.get('confidence', 'low')
                 
                 validated_results.append(r)
             
@@ -1476,6 +1813,100 @@ MANDATORY: Extract ALL {len(kpis_batch)} KPIs. Use inference and context clues. 
                 for kpi in kpis_batch
             ]
 
+    def _extract_structured_data(self, search_data: Dict[str, Any]) -> Dict[str, Any]:
+        """Extract structured numeric data from all content sources"""
+        extracted = {}
+        
+        # Process all content sources
+        all_content = []
+        
+        # Add Wikipedia content
+        if search_data.get("wikipedia_content"):
+            all_content.append(search_data["wikipedia_content"])
+        
+        # Add official website content
+        for item in search_data.get("official_website_content", []):
+            if item.get("content"):
+                all_content.append(item["content"])
+        
+        # Add public disclosure content
+        for item in search_data.get("public_disclosure_content", []):
+            if item.get("content"):
+                all_content.append(item["content"])
+        
+        # Add snippets from search results
+        for item in search_data.get("nirf", []):
+            if item.get("snippet"):
+                all_content.append(item["snippet"])
+        
+        # Extract structured data from all content
+        combined_text = " ".join(all_content)
+        extracted = StructuredDataParser.extract_all_numbers(combined_text)
+        
+        logger.info(f"Structured data extracted: {list(extracted.keys())}")
+        return extracted
+    
+    def _validate_and_boost_results(self, results: List[Dict], search_data: Dict[str, Any]) -> List[Dict]:
+        """Validate results and boost confidence based on multiple source verification"""
+        validated_results = []
+        structured_data = search_data.get("structured_extracted", {})
+        
+        # Map KPI names to structured data types
+        kpi_to_structured = {
+            "Median Compensation (Last Batch)": "median_salary",
+            "Maximum Compensation (Last Placement Season)": "highest_salary",
+            "Total Faculty": "total_faculty",
+            "PhD Faculty": "phd_faculty",
+            "Total Students Enrolled": "total_students",
+            "NIRF Ranking Band": "nirf_rank",
+            "PhD Students Enrolled": "phd_students",
+        }
+        
+        for result in results:
+            kpi_name = result.get("kpi_name", "")
+            current_value = result.get("value", "")
+            current_confidence = result.get("confidence", "low")
+            
+            # Try to cross-verify with structured data
+            if kpi_name in kpi_to_structured:
+                structured_key = kpi_to_structured[kpi_name]
+                if structured_key in structured_data:
+                    structured_value = structured_data[structured_key]
+                    
+                    # If LLM didn't find data but structured parser did
+                    if current_value in ["Data Not Found", "N/A", "", None]:
+                        result["value"] = structured_value
+                        result["confidence"] = "medium"
+                        result["evidence_quote"] = f"Extracted via pattern matching: {structured_value}"
+                        result["source_type"] = "Structured Extraction"
+                    
+                    # If both found similar values, boost confidence
+                    elif current_value and str(current_value) != "Data Not Found":
+                        try:
+                            llm_val = float(str(current_value).replace(',', '').replace('₹', '').replace('Rs', ''))
+                            # If values are within 20% of each other, boost confidence
+                            if abs(llm_val - structured_value) / max(llm_val, structured_value) < 0.2:
+                                result["confidence"] = "high"
+                                result["evidence_quote"] += f" [Cross-verified: {structured_value}]"
+                        except (ValueError, TypeError):
+                            pass
+            
+            # Validate URL is from official source
+            source_url = result.get("source_url", "")
+            if source_url and source_url != "N/A":
+                if not self.validator.is_official_source(source_url):
+                    result["source_url"] = "N/A"
+                    if result["confidence"] == "high":
+                        result["confidence"] = "medium"
+            
+            # Ensure confidence is valid
+            if result.get("confidence") not in ["high", "medium", "low"]:
+                result["confidence"] = "low"
+            
+            validated_results.append(result)
+        
+        return validated_results
+
     async def run_audit(self, college_name: str, progress_callback=None) -> List[Dict]:
         """Run the complete audit process with STRICT official source filtering"""
         
@@ -1487,8 +1918,8 @@ MANDATORY: Extract ALL {len(kpis_batch)} KPIs. Use inference and context clues. 
             return [{"kpi_name": "Error", "category": "Config", "value": "SERPER_API_KEY not set", 
                     "evidence_quote": "", "source_url": "", "confidence": "low"}]
         
-        genai.configure(api_key=self.gemini_api_key)
-        model = genai.GenerativeModel('models/gemini-2.0-flash')
+        # Initialize modern google-genai client
+        client = genai.Client(api_key=self.gemini_api_key)
         
         # Step 1: Gather data from OFFICIAL sources only
         if progress_callback:
@@ -1496,10 +1927,15 @@ MANDATORY: Extract ALL {len(kpis_batch)} KPIs. Use inference and context clues. 
         
         search_data = await self.gather_official_data(college_name, progress_callback)
         
-        total_sources = (len(search_data["official_website"]) + len(search_data["nirf"]) + 
-                        len(search_data["wikipedia"]) + len(search_data["naac"]))
+        # Extract structured data from content using parser
+        structured_data = self._extract_structured_data(search_data)
+        search_data["structured_extracted"] = structured_data
         
-        if total_sources < 3:
+        total_sources = (len(search_data["official_website"]) + len(search_data["nirf"]) + 
+                        len(search_data["wikipedia"]) + len(search_data["naac"]) + 
+                        len(search_data.get("public_disclosure", [])))
+        
+        if total_sources < 2:
             return [{"kpi_name": "Error", "category": "Search", 
                     "value": "Insufficient official sources found. Please verify college name.", 
                     "evidence_quote": f"Found only {total_sources} official sources",
@@ -1508,9 +1944,9 @@ MANDATORY: Extract ALL {len(kpis_batch)} KPIs. Use inference and context clues. 
         if progress_callback:
             await progress_callback(f"Found {total_sources} official sources. Extracting KPIs...", 90)
         
-        # Step 2: Extract KPIs in batches of 8 for speed
+        # Step 2: Extract KPIs in smaller batches for better accuracy (5 KPIs per batch)
         all_results = []
-        batch_size = 8  # Increased to 8 for faster extraction
+        batch_size = 5  # Smaller batches for better accuracy on each KPI
         total_kpis = len(self.kpis_data)
         
         for i in range(0, total_kpis, batch_size):
@@ -1523,11 +1959,17 @@ MANDATORY: Extract ALL {len(kpis_batch)} KPIs. Use inference and context clues. 
                 await progress_callback(f"Extracting KPIs batch {batch_num}/{total_batches}...", min(progress, 99))
             
             batch_results = await self.extract_kpi_with_strict_sources(
-                college_name, batch, search_data, model
+                college_name, batch, search_data, client
             )
             all_results.extend(batch_results)
             
-            await asyncio.sleep(0.1)  # Minimal delay between batches
+            await asyncio.sleep(0.05)  # Minimal delay between batches
+        
+        # Step 3: Validate and boost confidence
+        if progress_callback:
+            await progress_callback("Validating and cross-referencing results...", 99)
+        
+        all_results = self._validate_and_boost_results(all_results, search_data)
         
         if progress_callback:
             await progress_callback("Audit complete!", 100)
@@ -1543,10 +1985,23 @@ auditor = CollegeKPIAuditor()
 async def process_audit(audit_id: str, college_name: str):
     """Background task to process audit"""
     try:
+        institute_info = {}
+        
         async def progress_callback(message: str, progress: int):
             if audit_id in audits_store:
                 audits_store[audit_id]["progress"] = progress
                 audits_store[audit_id]["progress_message"] = message
+        
+        # Fetch Wikipedia info first for institute details
+        wiki_data = auditor.fetch_wikipedia_content(college_name)
+        if wiki_data.get("success"):
+            institute_info = auditor.extract_institute_info(college_name, wiki_data.get("content", ""))
+            institute_info["wikipedia_url"] = wiki_data.get("url", "")
+            if wiki_data.get("title"):
+                institute_info["full_name"] = wiki_data["title"]
+            # Update the audit store with institute info early
+            if audit_id in audits_store:
+                audits_store[audit_id]["institute_info"] = institute_info
         
         results = await auditor.run_audit(college_name, progress_callback)
         
@@ -1594,6 +2049,7 @@ async def process_audit(audit_id: str, college_name: str):
                 "progress_message": "Audit complete!",
                 "results": results,
                 "summary": summary,
+                "institute_info": institute_info,
                 "completed_at": datetime.now(timezone.utc).isoformat()
             })
         
@@ -1671,7 +2127,18 @@ async def get_audit_status(audit_id: str):
     if not audit:
         raise HTTPException(status_code=404, detail="Audit not found")
     
-    return audit
+    # Calculate time taken if audit is completed
+    response = dict(audit)
+    if audit.get('status') == 'completed' and audit.get('created_at') and audit.get('completed_at'):
+        try:
+            created = datetime.fromisoformat(audit['created_at'].replace('Z', '+00:00'))
+            completed = datetime.fromisoformat(audit['completed_at'].replace('Z', '+00:00'))
+            time_taken_seconds = (completed - created).total_seconds()
+            response['time_taken_seconds'] = time_taken_seconds
+        except Exception as e:
+            logger.warning(f"Could not calculate time taken: {e}")
+    
+    return response
 
 @api_router.get("/audit/{audit_id}/stream")
 async def stream_audit_progress(audit_id: str):

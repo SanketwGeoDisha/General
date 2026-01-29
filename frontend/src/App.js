@@ -143,7 +143,50 @@ function App() {
   const exportResults = () => {
     if (!currentAudit?.results) return;
     
+    // Format time taken for export
+    const formatTimeTaken = (seconds) => {
+      if (!seconds) return "N/A";
+      if (seconds >= 60) {
+        return `${Math.floor(seconds / 60)}m ${Math.round(seconds % 60)}s`;
+      }
+      return `${Math.round(seconds)}s`;
+    };
+    
+    // Overview Section
+    const overviewSection = [
+      "=== INSTITUTE INFORMATION ===",
+      `Full Name,"${currentAudit.institute_info?.full_name || currentAudit.college_name}"`,
+      `Short Name,"${currentAudit.institute_info?.short_name || 'N/A'}"`,
+      `Location,"${currentAudit.institute_info?.location || 'N/A'}"`,
+      `City,"${currentAudit.institute_info?.city || 'N/A'}"`,
+      `State,"${currentAudit.institute_info?.state || 'N/A'}"`,
+      `Established,"${currentAudit.institute_info?.established || 'N/A'}"`,
+      `Type,"${currentAudit.institute_info?.type || 'N/A'}"`,
+      `Website,"${currentAudit.institute_info?.website || 'N/A'}"`,
+      `Wikipedia,"${currentAudit.institute_info?.wikipedia_url || 'N/A'}"`,
+      "",
+      "=== AUDIT OVERVIEW ===",
+      `Audit Date,"${currentAudit.created_at ? new Date(currentAudit.created_at).toLocaleString() : 'N/A'}"`,
+      `Time Taken,"${formatTimeTaken(currentAudit.time_taken_seconds)}"`,
+      `Data Found,${currentAudit.summary?.data_found || 0}`,
+      `Data Not Found,${currentAudit.summary?.data_not_found || 0}`,
+      `High Confidence,${currentAudit.summary?.high_confidence || 0}`,
+      `Coverage Percentage,${currentAudit.summary?.coverage_percentage || 0}%`,
+      "",
+      "=== CATEGORY BREAKDOWN ===",
+      "Category,Found,Total,Percentage"
+    ];
+    
+    // Add category breakdown
+    Object.entries(currentAudit.summary?.categories || {}).forEach(([category, stats]) => {
+      const percentage = stats.total > 0 ? Math.round((stats.found / stats.total) * 100) : 0;
+      overviewSection.push(`"${category}",${stats.found},${stats.total},${percentage}%`);
+    });
+    
+    overviewSection.push("", "=== KPI DETAILS ===");
+    
     const csvContent = [
+      ...overviewSection,
       ["KPI Name", "Category", "Value", "Evidence", "Source URL", "Confidence"].join(","),
       ...currentAudit.results.map(r => [
         `"${r.kpi_name}"`,
@@ -289,6 +332,81 @@ function App() {
 
               {/* Overview Tab */}
               <TabsContent value="overview">
+                {/* Institute Intro Card */}
+                {currentAudit.institute_info && (
+                  <Card className="bg-gradient-to-br from-teal-500/10 to-cyan-600/10 border-teal-500/20 mb-8">
+                    <CardContent className="p-6">
+                      <div className="flex items-start gap-6">
+                        <div className="w-16 h-16 rounded-2xl bg-gradient-to-br from-teal-400 to-cyan-600 flex items-center justify-center flex-shrink-0">
+                          <GraduationCap className="w-8 h-8 text-white" />
+                        </div>
+                        <div className="flex-1 min-w-0">
+                          <div className="flex items-center gap-3 mb-2 flex-wrap">
+                            <h2 className="text-2xl font-bold text-white font-['Space_Grotesk']">
+                              {currentAudit.institute_info.full_name || currentAudit.college_name}
+                            </h2>
+                            {currentAudit.institute_info.short_name && (
+                              <Badge className="bg-teal-500/20 text-teal-400 border-teal-500/30">
+                                {currentAudit.institute_info.short_name}
+                              </Badge>
+                            )}
+                            {currentAudit.institute_info.type && (
+                              <Badge variant="outline" className="border-white/20 text-white/70">
+                                {currentAudit.institute_info.type}
+                              </Badge>
+                            )}
+                          </div>
+                          
+                          <div className="flex flex-wrap items-center gap-4 text-sm text-white/60">
+                            {currentAudit.institute_info.location && (
+                              <span className="flex items-center gap-1.5">
+                                <Building2 className="w-4 h-4 text-teal-400" />
+                                {currentAudit.institute_info.location}
+                              </span>
+                            )}
+                            {currentAudit.institute_info.established && (
+                              <span className="flex items-center gap-1.5">
+                                <Clock className="w-4 h-4 text-cyan-400" />
+                                Est. {currentAudit.institute_info.established}
+                              </span>
+                            )}
+                            {currentAudit.institute_info.website && (
+                              <a 
+                                href={currentAudit.institute_info.website}
+                                target="_blank"
+                                rel="noopener noreferrer"
+                                className="flex items-center gap-1.5 text-teal-400 hover:text-teal-300 transition-colors"
+                              >
+                                <Globe className="w-4 h-4" />
+                                Official Website
+                                <ExternalLink className="w-3 h-3" />
+                              </a>
+                            )}
+                            {currentAudit.institute_info.wikipedia_url && (
+                              <a 
+                                href={currentAudit.institute_info.wikipedia_url}
+                                target="_blank"
+                                rel="noopener noreferrer"
+                                className="flex items-center gap-1.5 text-cyan-400 hover:text-cyan-300 transition-colors"
+                              >
+                                <BookOpen className="w-4 h-4" />
+                                Wikipedia
+                                <ExternalLink className="w-3 h-3" />
+                              </a>
+                            )}
+                          </div>
+                          
+                          {currentAudit.institute_info.motto && (
+                            <p className="mt-3 text-sm text-white/50 italic">
+                              "{currentAudit.institute_info.motto}"
+                            </p>
+                          )}
+                        </div>
+                      </div>
+                    </CardContent>
+                  </Card>
+                )}
+
                 <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4 mb-8">
                   <Card className="bg-white/[0.02] border-white/5">
                     <CardContent className="p-6">
@@ -341,6 +459,26 @@ function App() {
                         <div>
                           <p className="text-3xl font-bold text-white">{currentAudit.summary?.coverage_percentage || 0}%</p>
                           <p className="text-white/50 text-sm">Coverage</p>
+                        </div>
+                      </div>
+                    </CardContent>
+                  </Card>
+                  
+                  <Card className="bg-white/[0.02] border-white/5">
+                    <CardContent className="p-6">
+                      <div className="flex items-center gap-4">
+                        <div className="w-12 h-12 rounded-xl bg-purple-500/20 flex items-center justify-center">
+                          <Clock className="w-6 h-6 text-purple-400" />
+                        </div>
+                        <div>
+                          <p className="text-3xl font-bold text-white">
+                            {currentAudit.time_taken_seconds 
+                              ? currentAudit.time_taken_seconds >= 60 
+                                ? `${Math.floor(currentAudit.time_taken_seconds / 60)}m ${Math.round(currentAudit.time_taken_seconds % 60)}s`
+                                : `${Math.round(currentAudit.time_taken_seconds)}s`
+                              : "N/A"}
+                          </p>
+                          <p className="text-white/50 text-sm">Time Taken</p>
                         </div>
                       </div>
                     </CardContent>
