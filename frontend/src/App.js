@@ -27,7 +27,8 @@ import {
   RefreshCw,
   ChevronRight,
   Sparkles,
-  ExternalLink
+  ExternalLink,
+  Atom
 } from "lucide-react";
 
 const BACKEND_URL = process.env.REACT_APP_BACKEND_URL;
@@ -52,6 +53,14 @@ const confidenceColors = {
   high: "bg-emerald-500/20 text-emerald-400 border-emerald-500/30",
   medium: "bg-amber-500/20 text-amber-400 border-amber-500/30",
   low: "bg-red-500/20 text-red-400 border-red-500/30",
+};
+
+// Source priority colors
+const priorityColors = {
+  high: "bg-blue-500/20 text-blue-400 border-blue-500/30",
+  medium: "bg-purple-500/20 text-purple-400 border-purple-500/30",
+  low: "bg-orange-500/20 text-orange-400 border-orange-500/30",
+  unknown: "bg-gray-500/20 text-gray-400 border-gray-500/30",
 };
 
 function App() {
@@ -129,6 +138,52 @@ function App() {
     }
   };
 
+  const stopAudit = async () => {
+    if (!currentAudit?.id) {
+      console.error('No audit ID found');
+      return;
+    }
+    
+    // Update UI immediately to show cancellation
+    setCurrentAudit(prev => ({
+      ...prev,
+      status: "cancelled",
+      progress_message: "Cancelling audit...",
+      progress: prev.progress || 0
+    }));
+    setIsLoading(false);
+    
+    // Clear polling interval immediately
+    if (pollIntervalRef.current) {
+      clearInterval(pollIntervalRef.current);
+      pollIntervalRef.current = null;
+    }
+    
+    try {
+      console.log(`Attempting to cancel audit: ${currentAudit.id}`);
+      const response = await axios.post(`${API}/audit/${currentAudit.id}/cancel`);
+      console.log('Cancel response:', response.data);
+      
+      // Update with final cancelled state
+      setCurrentAudit(prev => ({
+        ...prev,
+        status: "cancelled",
+        progress_message: "Audit cancelled by user"
+      }));
+      
+      // Reload audits list after a short delay
+      setTimeout(() => loadRecentAudits(), 500);
+    } catch (error) {
+      console.error("Stop audit error:", error);
+      const errorMessage = error.response?.data?.detail || error.message || "Unknown error";
+      
+      // Only alert if it's a real error (not already cancelled/completed)
+      if (error.response?.status !== 400) {
+        alert(`Failed to stop audit: ${errorMessage}`);
+      }
+    }
+  };
+
   const loadAudit = async (auditId) => {
     try {
       const response = await axios.get(`${API}/audit/${auditId}`);
@@ -154,16 +209,7 @@ function App() {
     
     // Overview Section
     const overviewSection = [
-      "=== INSTITUTE INFORMATION ===",
-      `Full Name,"${currentAudit.institute_info?.full_name || currentAudit.college_name}"`,
-      `Short Name,"${currentAudit.institute_info?.short_name || 'N/A'}"`,
-      `Location,"${currentAudit.institute_info?.location || 'N/A'}"`,
-      `City,"${currentAudit.institute_info?.city || 'N/A'}"`,
-      `State,"${currentAudit.institute_info?.state || 'N/A'}"`,
-      `Established,"${currentAudit.institute_info?.established || 'N/A'}"`,
-      `Type,"${currentAudit.institute_info?.type || 'N/A'}"`,
-      `Website,"${currentAudit.institute_info?.website || 'N/A'}"`,
-      `Wikipedia,"${currentAudit.institute_info?.wikipedia_url || 'N/A'}"`,
+      `College Name,"${currentAudit.college_name}"`,
       "",
       "=== AUDIT OVERVIEW ===",
       `Audit Date,"${currentAudit.created_at ? new Date(currentAudit.created_at).toLocaleString() : 'N/A'}"`,
@@ -187,14 +233,18 @@ function App() {
     
     const csvContent = [
       ...overviewSection,
-      ["KPI Name", "Category", "Value", "Evidence", "Source URL", "Confidence"].join(","),
+      ["KPI Name", "Category", "Value", "Evidence", "Source URL", "System Confidence", "LLM Confidence", "Source Priority", "Data Year", "Recency"].join(","),
       ...currentAudit.results.map(r => [
         `"${r.kpi_name}"`,
         `"${r.category}"`,
         `"${r.value}"`,
         `"${(r.evidence_quote || "").replace(/"/g, '""')}"`,
         `"${r.source_url}"`,
-        r.confidence
+        r.system_confidence || r.confidence || "low",
+        r.llm_confidence || "low",
+        r.source_priority || "unknown",
+        r.data_year || "",
+        r.recency || "unknown"
       ].join(","))
     ].join("\n");
     
@@ -203,6 +253,38 @@ function App() {
     const a = document.createElement("a");
     a.href = url;
     a.download = `${currentAudit.college_name}_audit_${new Date().toISOString().split("T")[0]}.csv`;
+    a.click();
+  };
+
+  const exportJSON = () => {
+    if (!currentAudit) return;
+    
+    const jsonData = {
+      college_name: currentAudit.college_name,
+      audit_date: currentAudit.created_at,
+      time_taken_seconds: currentAudit.time_taken_seconds,
+      summary: currentAudit.summary,
+      results: currentAudit.results.map(r => ({
+        kpi_name: r.kpi_name,
+        category: r.category,
+        value: r.value,
+        evidence_quote: r.evidence_quote,
+        source_url: r.source_url,
+        source_type: r.source_type,
+        system_confidence: r.system_confidence || r.confidence,
+        llm_confidence: r.llm_confidence,
+        llm_confidence_reason: r.llm_confidence_reason,
+        source_priority: r.source_priority,
+        data_year: r.data_year,
+        recency: r.recency
+      }))
+    };
+    
+    const blob = new Blob([JSON.stringify(jsonData, null, 2)], { type: "application/json" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `${currentAudit.college_name}_audit_${new Date().toISOString().split("T")[0]}.json`;
     a.click();
   };
 
@@ -236,16 +318,28 @@ function App() {
           
           <div className="flex items-center gap-3">
             {currentAudit?.results?.length > 0 && (
-              <Button 
-                variant="outline" 
-                size="sm" 
-                onClick={exportResults}
-                className="border-white/10 bg-white/5 hover:bg-white/10"
-                data-testid="export-btn"
-              >
-                <Download className="w-4 h-4 mr-2" />
-                Export CSV
-              </Button>
+              <>
+                <Button 
+                  variant="outline" 
+                  size="sm" 
+                  onClick={exportResults}
+                  className="border-white/10 bg-white/5 hover:bg-white/10"
+                  data-testid="export-csv-btn"
+                >
+                  <Download className="w-4 h-4 mr-2" />
+                  Export CSV
+                </Button>
+                <Button 
+                  variant="outline" 
+                  size="sm" 
+                  onClick={exportJSON}
+                  className="border-white/10 bg-white/5 hover:bg-white/10"
+                  data-testid="export-json-btn"
+                >
+                  <Download className="w-4 h-4 mr-2" />
+                  Export JSON
+                </Button>
+              </>
             )}
           </div>
         </div>
@@ -294,19 +388,51 @@ function App() {
         {/* Progress Section */}
         {currentAudit?.status === "processing" && (
           <section className="mb-8" data-testid="progress-section">
-            <Card className="bg-gradient-to-br from-teal-500/10 to-cyan-600/10 border-teal-500/20">
+            <Card className="bg-white/[0.02] border-white/5">
               <CardContent className="p-6">
-                <div className="flex items-center gap-4 mb-4">
-                  <div className="w-12 h-12 rounded-xl bg-teal-500/20 flex items-center justify-center">
-                    <RefreshCw className="w-6 h-6 text-teal-400 animate-spin" />
+                <div className="flex items-center justify-between gap-4">
+                  <div className="flex items-center gap-4 flex-1">
+                    <RefreshCw className="w-8 h-8 text-teal-400 animate-spin" />
+                    <div className="flex-1">
+                      <p className="text-white font-medium mb-1">
+                        {currentAudit.progress_message || "Processing..."}
+                      </p>
+                      {currentAudit.progress > 0 && (
+                        <div className="flex items-center gap-3">
+                          <Progress value={currentAudit.progress} className="h-2 flex-1" />
+                          <span className="text-sm text-white/50">{currentAudit.progress}%</span>
+                        </div>
+                      )}
+                    </div>
                   </div>
-                  <div className="flex-1">
-                    <h3 className="text-lg font-semibold text-white">Analyzing {currentAudit.college_name}</h3>
-                    <p className="text-white/60 text-sm">{currentAudit.progress_message}</p>
-                  </div>
-                  <span className="text-2xl font-bold text-teal-400">{currentAudit.progress}%</span>
+                  <Button 
+                    variant="outline" 
+                    onClick={stopAudit}
+                    className="border-red-500/30 bg-red-500/10 hover:bg-red-500/20 text-red-400"
+                  >
+                    <XCircle className="w-4 h-4 mr-2" />
+                    Stop
+                  </Button>
                 </div>
-                <Progress value={currentAudit.progress} className="h-2 bg-white/10" />
+              </CardContent>
+            </Card>
+          </section>
+        )}
+
+        {/* Cancelled Message */}
+        {currentAudit?.status === "cancelled" && (
+          <section className="mb-8" data-testid="cancelled-section">
+            <Card className="bg-amber-500/5 border-amber-500/20">
+              <CardContent className="p-6">
+                <div className="flex items-center gap-4">
+                  <div className="w-12 h-12 rounded-xl bg-amber-500/20 flex items-center justify-center">
+                    <AlertCircle className="w-6 h-6 text-amber-400" />
+                  </div>
+                  <div>
+                    <h3 className="text-lg font-semibold text-white mb-1">Audit Cancelled</h3>
+                    <p className="text-white/60">The audit was stopped before completion. You can start a new audit anytime.</p>
+                  </div>
+                </div>
               </CardContent>
             </Card>
           </section>
@@ -332,81 +458,6 @@ function App() {
 
               {/* Overview Tab */}
               <TabsContent value="overview">
-                {/* Institute Intro Card */}
-                {currentAudit.institute_info && (
-                  <Card className="bg-gradient-to-br from-teal-500/10 to-cyan-600/10 border-teal-500/20 mb-8">
-                    <CardContent className="p-6">
-                      <div className="flex items-start gap-6">
-                        <div className="w-16 h-16 rounded-2xl bg-gradient-to-br from-teal-400 to-cyan-600 flex items-center justify-center flex-shrink-0">
-                          <GraduationCap className="w-8 h-8 text-white" />
-                        </div>
-                        <div className="flex-1 min-w-0">
-                          <div className="flex items-center gap-3 mb-2 flex-wrap">
-                            <h2 className="text-2xl font-bold text-white font-['Space_Grotesk']">
-                              {currentAudit.institute_info.full_name || currentAudit.college_name}
-                            </h2>
-                            {currentAudit.institute_info.short_name && (
-                              <Badge className="bg-teal-500/20 text-teal-400 border-teal-500/30">
-                                {currentAudit.institute_info.short_name}
-                              </Badge>
-                            )}
-                            {currentAudit.institute_info.type && (
-                              <Badge variant="outline" className="border-white/20 text-white/70">
-                                {currentAudit.institute_info.type}
-                              </Badge>
-                            )}
-                          </div>
-                          
-                          <div className="flex flex-wrap items-center gap-4 text-sm text-white/60">
-                            {currentAudit.institute_info.location && (
-                              <span className="flex items-center gap-1.5">
-                                <Building2 className="w-4 h-4 text-teal-400" />
-                                {currentAudit.institute_info.location}
-                              </span>
-                            )}
-                            {currentAudit.institute_info.established && (
-                              <span className="flex items-center gap-1.5">
-                                <Clock className="w-4 h-4 text-cyan-400" />
-                                Est. {currentAudit.institute_info.established}
-                              </span>
-                            )}
-                            {currentAudit.institute_info.website && (
-                              <a 
-                                href={currentAudit.institute_info.website}
-                                target="_blank"
-                                rel="noopener noreferrer"
-                                className="flex items-center gap-1.5 text-teal-400 hover:text-teal-300 transition-colors"
-                              >
-                                <Globe className="w-4 h-4" />
-                                Official Website
-                                <ExternalLink className="w-3 h-3" />
-                              </a>
-                            )}
-                            {currentAudit.institute_info.wikipedia_url && (
-                              <a 
-                                href={currentAudit.institute_info.wikipedia_url}
-                                target="_blank"
-                                rel="noopener noreferrer"
-                                className="flex items-center gap-1.5 text-cyan-400 hover:text-cyan-300 transition-colors"
-                              >
-                                <BookOpen className="w-4 h-4" />
-                                Wikipedia
-                                <ExternalLink className="w-3 h-3" />
-                              </a>
-                            )}
-                          </div>
-                          
-                          {currentAudit.institute_info.motto && (
-                            <p className="mt-3 text-sm text-white/50 italic">
-                              "{currentAudit.institute_info.motto}"
-                            </p>
-                          )}
-                        </div>
-                      </div>
-                    </CardContent>
-                  </Card>
-                )}
-
                 <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4 mb-8">
                   <Card className="bg-white/[0.02] border-white/5">
                     <CardContent className="p-6">
@@ -431,20 +482,6 @@ function App() {
                         <div>
                           <p className="text-3xl font-bold text-white">{currentAudit.summary?.data_not_found || 0}</p>
                           <p className="text-white/50 text-sm">Not Found</p>
-                        </div>
-                      </div>
-                    </CardContent>
-                  </Card>
-                  
-                  <Card className="bg-white/[0.02] border-white/5">
-                    <CardContent className="p-6">
-                      <div className="flex items-center gap-4">
-                        <div className="w-12 h-12 rounded-xl bg-emerald-500/20 flex items-center justify-center">
-                          <TrendingUp className="w-6 h-6 text-emerald-400" />
-                        </div>
-                        <div>
-                          <p className="text-3xl font-bold text-white">{currentAudit.summary?.high_confidence || 0}</p>
-                          <p className="text-white/50 text-sm">High Confidence</p>
                         </div>
                       </div>
                     </CardContent>
@@ -584,7 +621,14 @@ function App() {
                   <CardContent className="p-4">
                     <div className="flex items-center justify-between mb-2">
                       <h3 className="font-medium text-white truncate">{audit.college_name}</h3>
-                      <Badge variant={audit.status === "completed" ? "default" : "secondary"} className="text-xs">
+                      <Badge 
+                        variant={audit.status === "completed" ? "default" : "secondary"} 
+                        className={`text-xs ${
+                          audit.status === "completed" ? "" : 
+                          audit.status === "cancelled" ? "bg-amber-500/20 text-amber-400 border-amber-500/30" :
+                          audit.status === "failed" ? "bg-red-500/20 text-red-400 border-red-500/30" : ""
+                        }`}
+                      >
                         {audit.status}
                       </Badge>
                     </div>
@@ -652,19 +696,75 @@ function KPICard({ result, showCategory = false }) {
   const isFound = !["data not found", "error", "processing error", "not available"].includes(String(result.value ?? '').toLowerCase());
   const displayValue = formatValue(result.value);
   
+  // Get both confidence levels
+  const systemConfidence = result.system_confidence || result.confidence || 'low';
+  const llmConfidence = result.llm_confidence || result.confidence || 'low';
+  const sourcePriority = result.source_priority || 'unknown';
+  
   return (
     <div className={`p-4 rounded-lg border ${isFound ? "bg-white/[0.02] border-white/10" : "bg-red-500/5 border-red-500/10"}`}>
-      <div className="flex items-start justify-between gap-4 mb-2">
+      <div className="flex items-start justify-between gap-4 mb-3">
         <div className="flex-1">
           <h4 className="font-medium text-white text-sm">{result.kpi_name}</h4>
           {showCategory && (
             <p className="text-xs text-white/40 mt-0.5">{result.category}</p>
           )}
         </div>
-        <Badge variant="outline" className={`text-xs ${confidenceColors[result.confidence] || confidenceColors.low}`}>
-          {result.confidence}
-        </Badge>
+        
+        {/* Dual Confidence Badges */}
+        <div className="flex flex-col gap-1.5">
+          <div className="flex items-center gap-1.5">
+            <span className="text-[10px] text-white/40 uppercase tracking-wide font-medium">Sys:</span>
+            <Badge 
+              variant="outline" 
+              className={`text-[10px] px-2 py-0.5 ${confidenceColors[systemConfidence] || confidenceColors.low}`}
+              title={`System confidence based on source priority: ${sourcePriority}`}
+            >
+              {systemConfidence}
+            </Badge>
+          </div>
+          <div className="flex items-center gap-1.5">
+            <span className="text-[10px] text-white/40 uppercase tracking-wide font-medium">LLM:</span>
+            <Badge 
+              variant="outline" 
+              className={`text-[10px] px-2 py-0.5 ${confidenceColors[llmConfidence] || confidenceColors.low}`}
+              title={result.llm_confidence_reason || "LLM's self-assessment of data reliability"}
+            >
+              {llmConfidence}
+            </Badge>
+          </div>
+          {result.recency && result.recency !== 'unknown' && (
+            <div className="flex items-center gap-1.5">
+              <span className="text-[10px] text-white/40 uppercase tracking-wide font-medium">Data:</span>
+              <Badge 
+                variant="outline" 
+                className={`text-[10px] px-2 py-0.5 ${
+                  result.recency === 'high' ? 'border-green-500/30 bg-green-500/10 text-green-400' :
+                  result.recency === 'medium' ? 'border-yellow-500/30 bg-yellow-500/10 text-yellow-400' :
+                  'border-orange-500/30 bg-orange-500/10 text-orange-400'
+                }`}
+                title={`Data from ${result.data_year || 'unknown year'}`}
+              >
+                {result.data_year || result.recency}
+              </Badge>
+            </div>
+          )}
+        </div>
       </div>
+      
+      {/* Source Priority Badge */}
+      {result.source_priority && result.source_priority !== 'unknown' && (
+        <div className="mb-2">
+          <Badge 
+            variant="outline" 
+            className={`text-[10px] ${priorityColors[sourcePriority] || priorityColors.unknown}`}
+          >
+            {sourcePriority === 'high' && '🏛️ Official/Government'}
+            {sourcePriority === 'medium' && '📚 Wikipedia'}
+            {sourcePriority === 'low' && '📊 Aggregator'}
+          </Badge>
+        </div>
+      )}
       
       <div className={`text-lg font-semibold mb-2 ${isFound ? "text-teal-400" : "text-white/30"}`}>
         {displayValue}
@@ -676,16 +776,39 @@ function KPICard({ result, showCategory = false }) {
         </p>
       )}
       
-      {result.source_url && result.source_url !== "N/A" && result.source_url !== "Not Available" && (
-        <a 
-          href={result.source_url.startsWith("http") ? result.source_url : `https://${result.source_url}`}
-          target="_blank"
-          rel="noopener noreferrer"
-          className="text-xs text-teal-400/70 hover:text-teal-400 flex items-center gap-1 truncate"
-        >
-          <ExternalLink className="w-3 h-3 flex-shrink-0" />
-          {result.source_url}
-        </a>
+      {/* LLM Confidence Reason */}
+      {result.llm_confidence_reason && result.llm_confidence_reason !== "Not provided by LLM" && result.llm_confidence_reason !== "Not explicitly provided by LLM" && (
+        <p className="text-[10px] text-white/40 italic mb-2">
+          💭 LLM: {result.llm_confidence_reason}
+        </p>
+      )}
+      
+      {/* Source URL - More Prominent */}
+      {result.source_url && result.source_url !== "N/A" && result.source_url !== "Not Available" ? (
+        <div className="mt-3 pt-3 border-t border-white/10">
+          <div className="flex items-start gap-2">
+            <div className="flex items-center gap-1.5 text-[10px] text-white/50 uppercase tracking-wide font-medium pt-0.5">
+              <ExternalLink className="w-3 h-3 flex-shrink-0" />
+              Source:
+            </div>
+            <a 
+              href={result.source_url.startsWith("http") ? result.source_url : `https://${result.source_url}`}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="text-xs text-teal-400 hover:text-teal-300 hover:underline break-all flex-1"
+              title={result.source_url}
+            >
+              {result.source_url}
+            </a>
+          </div>
+        </div>
+      ) : (
+        <div className="mt-3 pt-3 border-t border-white/10">
+          <div className="flex items-center gap-1.5 text-[10px] text-white/30 uppercase tracking-wide font-medium">
+            <ExternalLink className="w-3 h-3 flex-shrink-0" />
+            Source: Not Available
+          </div>
+        </div>
       )}
     </div>
   );

@@ -1,0 +1,101 @@
+IIT Bombay
+IIT Delhi
+IIT Madras
+IIT Kanpur
+IIT Kharagpur
+IIT Roorkee
+IIT Guwahati
+IIT Hyderabad
+IIT Indore
+IIT BHU Varanasi
+NIT Trichy
+NIT Warangal
+NIT Surathkal
+NIT Rourkela
+NIT Calicut
+NIT Durgapur
+NIT Jaipur
+NIT Kurukshetra
+BITS Pilani
+VIT Vellore
+Manipal Institute of Technology
+SRM Institute of Science and Technology
+Amity University Noida
+Delhi Technological University
+Anna University
+Jadavpur University
+Thapar Institute of Engineering and Technology
+PEC University of Technology Chandigarh
+COEP Pune
+ICT Mumbai
+Netaji Subhas University of Technology
+LPU Jalandhar
+Chandigarh University
+BMS College of Engineering Bangalore
+RV College of Engineering Bangalore
+MS Ramaiah Institute of Technology
+PES University Bangalore
+JSS Science and Technology University Mysore
+BMSCE Bangalore
+Dayananda Sagar College of Engineering
+NIE Mysore
+SJCE Mysore
+Visvesvaraya Technological University
+MIT Manipal
+KLE Technological University
+BVB College of Engineering and Technology
+Coimbatore Institute of Technology
+PSG College of Technology
+Thiagarajar College of Engineering
+SSN College of Engineering
+Veermata Jijabai Technological Institute Mumbai
+Sardar Patel College of Engineering Mumbai
+DJ Sanghvi College of Engineering Mumbai
+KJSCE Mumbai
+Shah and Anchor Kutchhi Engineering College Mumbai
+Pune Institute of Computer Technology
+VIT Pune
+MKSSS Cummins College of Engineering Pune
+Walchand College of Engineering Sangli
+Government College of Engineering Pune
+College of Engineering Pune
+Shivaji University Kolhapur
+SGGS Institute of Engineering and Technology Nanded
+Government College of Engineering Aurangabad
+Marathwada Mitra Mandal College of Engineering Pune
+All India Institute of Medical Sciences Delhi
+Jawaharlal Nehru University
+University of Delhi
+Banaras Hindu University
+Aligarh Muslim University
+University of Hyderabad
+IISc Bangalore
+IIIT Hyderabad
+IIIT Bangalore
+IIIT Delhi
+IIIT Allahabad
+DA-IICT Gandhinagar
+IIITDM Jabalpur
+IIITDM Kancheepuram
+NIT Agartala
+NIT Arunachal Pradesh
+NIT Goa
+NIT Hamirpur
+NIT Jalandhar
+NIT Manipur
+NIT Meghalaya
+NIT Mizoram
+NIT Nagaland
+NIT Patna
+NIT Puducherry
+NIT Raipur
+NIT Sikkim
+NIT Silchar
+NIT Srinagar
+NIT Uttarakhand
+IIEST Shibpur
+SLIET Longowal
+SVNIT Surat
+MANIT Bhopal
+MNNIT Allahabad
+VNIT Nagpur

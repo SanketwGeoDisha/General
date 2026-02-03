@@ -23,8 +23,21 @@ import functools
 import hashlib
 from collections import OrderedDict
 
+# Import NIRF collector
+try:
+    from nirf_collector import NIRFCollector, collect_nirf_for_college
+except ImportError:
+    logging.warning("Could not import nirf_collector, NIRF enhanced discovery will be disabled")
+    NIRFCollector = None
+    collect_nirf_for_college = None
+
 ROOT_DIR = Path(__file__).parent
 load_dotenv(ROOT_DIR / '.env')
+
+# Custom exception for API key exhaustion
+class APIKeyExhaustedException(Exception):
+    """Raised when a Serper API key returns 400 Bad Request"""
+    pass
 
 # In-memory storage for audits
 audits_store: Dict[str, Dict[str, Any]] = {}
@@ -37,7 +50,7 @@ class LRUCache:
         self.cache: OrderedDict = OrderedDict()
         self.max_size = max_size
         self.ttl = ttl_seconds
-        self._lock = asyncio.Lock() if asyncio.get_event_loop().is_running() else None
+        self._lock = None  # Will be created lazily if needed
     
     def _get_key(self, *args) -> str:
         """Generate cache key from arguments"""
@@ -71,6 +84,54 @@ search_cache = LRUCache(max_size=1000, ttl_seconds=7200)  # 2 hours for search r
 content_cache = LRUCache(max_size=200, ttl_seconds=14400)  # 4 hours for fetched content
 
 # ============ KPI Schema with Search Keywords ============
+
+# KPIs that can be extracted from NIRF Overall document
+NIRF_EXTRACTABLE_KPIS = {
+    "Total Graduate Students (2025)": {
+        "nirf_field": "Total number of students graduating in minimum stipulated time",
+        "nirf_location": "Student Progression section or Metric 2.6"
+    },
+    "Placed Students Count": {
+        "nirf_field": "Number of students placed",
+        "nirf_location": "Placements section or Metric 5.2"
+    },
+    "Median Compensation (Last Batch)": {
+        "nirf_field": "Median salary of placed graduates (Amount in Rs.)",
+        "nirf_location": "Placements section or Metric 5.2.1"
+    },
+    "Students Pursuing Higher Education": {
+        "nirf_field": "Number of students selected for Higher Studies",
+        "nirf_location": "Student Outcomes section or Metric 5.2"
+    },
+    "IP Patents Granted/Licensed (Latest Year)": {
+        "nirf_field": "No. of Patents Published, No. of Patents Granted",
+        "nirf_location": "IPR/Research section or Metric 3.4"
+    },
+    "Total Students Enrolled": {
+        "nirf_field": "Total Actual Student Strength - sum of all programs and years",
+        "nirf_location": "Student Enrollment section or Table showing program-wise student strength"
+    },
+    "Female Students Enrolled": {
+        "nirf_field": "No. of Female Students from Total Student Strength table",
+        "nirf_location": "Student Demographics section or Gender diversity table"
+    },
+    "Total Faculty": {
+        "nirf_field": "Faculty Details - check last row total number",
+        "nirf_location": "Faculty section or Metric 2.4, look for total count"
+    },
+    "PhD Faculty": {
+        "nirf_field": "Faculty Details where Qualification == Ph.D",
+        "nirf_location": "Faculty qualification table, count rows with PhD"
+    },
+    "Average Teaching Experience of Faculty": {
+        "nirf_field": "Average of 'Experience (In Months)' column, convert to years",
+        "nirf_location": "Faculty Details table, Experience column"
+    },
+    "PhD Students Enrolled": {
+        "nirf_field": "Ph.D Student Details (Full Time + Part Time doctoral students till 2023-24)",
+        "nirf_location": "PhD enrollment section or Metric 2.5, sum full-time and part-time"
+    }
+}
 
 KPI_SCHEMA = {
     "college_kpis": [
@@ -165,10 +226,10 @@ KPI_SCHEMA = {
             "data_type": "integer",
             "unit": "count",
             "validation_rules": "positive integer",
-            "extraction_instruction": "Total number of graduating students across all programs for academic year 2024-25.",
+            "extraction_instruction": "[NIRF EXTRACTABLE] Total number of students graduating in minimum stipulated time. In NIRF document, look for 'Total number of students graduating in minimum stipulated time' or 'No. of students graduating' in Student Progression section (Metric 2.6). This is the count of students who completed their program within the prescribed duration.",
             "example_value": 1200,
             "remarks_required": False,
-            "search_keywords": ["graduating batch 2025", "final year students", "outgoing batch", "students graduated", "batch size 2025"]
+            "search_keywords": ["graduating batch 2025", "final year students", "outgoing batch", "students graduated", "batch size 2025", "NIRF students graduating", "minimum stipulated time"]
         },
         {
             "field_name": "placed_students_count",
@@ -177,10 +238,10 @@ KPI_SCHEMA = {
             "data_type": "integer",
             "unit": "count",
             "validation_rules": "positive integer <= total_graduate_students",
-            "extraction_instruction": "Number of graduating students who received job offers through campus placements.",
+            "extraction_instruction": "[NIRF EXTRACTABLE] Number of students placed out of graduating students. In NIRF document, look for 'No. of students placed' in Placements section (Metric 5.2). This is the actual count of students who got jobs, not percentage.",
             "example_value": 950,
             "remarks_required": False,
-            "search_keywords": ["students placed", "placement statistics", "placement record", "campus placement", "students recruited", "placement percentage"]
+            "search_keywords": ["students placed", "placement statistics", "placement record", "campus placement", "students recruited", "placement percentage", "NIRF placements", "no. of students placed"]
         },
         {
             "field_name": "max_compensation_last_season",
@@ -201,10 +262,10 @@ KPI_SCHEMA = {
             "data_type": "string",
             "unit": "LPA or Cr",
             "validation_rules": "formatted string with LPA or Cr suffix",
-            "extraction_instruction": "Median annual compensation offered to placed students from last graduating batch. Format: If below 1 Crore (< 1,00,00,000), show as 'X.XX LPA' (e.g., '8.5 LPA', '12 LPA'). If 1 Crore or above, show as 'X.XX Cr' (e.g., '1.2 Cr'). Always include the unit suffix.",
+            "extraction_instruction": "[NIRF EXTRACTABLE] Median salary of placed graduates (Amount in Rs.) In NIRF document, look for 'Median salary of placed graduates' in Placements section (Metric 5.2.1). The value is usually in Rupees, convert to LPA: divide by 100,000. Format: If below 1 Crore (< 1,00,00,000), show as 'X.XX LPA' (e.g., '8.5 LPA', '12 LPA'). If 1 Crore or above, show as 'X.XX Cr' (e.g., '1.2 Cr'). Always include the unit suffix.",
             "example_value": "8.5 LPA",
             "remarks_required": False,
-            "search_keywords": ["median salary", "median package", "median CTC", "average package", "average salary", "mean compensation"]
+            "search_keywords": ["median salary", "median package", "median CTC", "NIRF median salary", "median salary of placed graduates"]
         },
         {
             "field_name": "students_higher_education",
@@ -213,10 +274,10 @@ KPI_SCHEMA = {
             "data_type": "integer",
             "unit": "count",
             "validation_rules": "positive integer",
-            "extraction_instruction": "Number of graduating students who enrolled in higher education (Masters/PhD) after graduation. Extract from NIRF data under 'Students admitted to higher studies' or 'Metric 5.2' section.",
+            "extraction_instruction": "[NIRF EXTRACTABLE] Number of students selected for Higher Studies. In NIRF document, look for 'No. of students selected for Higher Studies' in Student Outcomes or Placements section (Metric 5.2). This includes students admitted to Masters, PhD, or other postgraduate programs.",
             "example_value": 150,
             "remarks_required": False,
-            "search_keywords": ["NIRF higher studies", "students admitted to higher studies", "pursuing masters", "MS abroad", "PhD admission", "higher education", "postgraduate studies", "NIRF metric 5.2", "nirfindia.org higher education"]
+            "search_keywords": ["NIRF higher studies", "students admitted to higher studies", "students selected for higher studies", "pursuing masters", "postgraduate studies", "NIRF metric 5.2"]
         },
         {
             "field_name": "ip_patents_last_year",
@@ -225,10 +286,10 @@ KPI_SCHEMA = {
             "data_type": "integer",
             "unit": "count",
             "validation_rules": "positive integer or 0",
-            "extraction_instruction": "Number of patents granted or licensed to the institution in the latest academic year.",
+            "extraction_instruction": "[NIRF EXTRACTABLE] IPR - No. of Patents Published + No. of Patents Granted. In NIRF document, look for IPR section (Metric 3.4) which shows 'No. of Patents Published' and 'No. of Patents Granted'. Take the sum of both numbers or take Patents Granted as priority.",
             "example_value": 12,
             "remarks_required": False,
-            "search_keywords": ["patents granted", "patents filed", "intellectual property", "IPR", "patent publications", "innovations patented"]
+            "search_keywords": ["patents granted", "patents published", "intellectual property", "IPR", "NIRF patents", "NIRF IPR", "No. of patents"]
         },
         {
             "field_name": "entrance_exam_name",
@@ -261,10 +322,10 @@ KPI_SCHEMA = {
             "data_type": "integer",
             "unit": "count",
             "validation_rules": "positive integer",
-            "extraction_instruction": "Total student enrollment across all programs and academic years.",
+            "extraction_instruction": "[NIRF EXTRACTABLE] Total Actual Student Strength across all programs. In NIRF document, look for 'Total Actual Student Strength' table which shows program-wise student count. Sum all programs and all years (1st year, 2nd year, etc.) to get total. Usually in Student Enrollment section.",
             "example_value": 5000,
             "remarks_required": False,
-            "search_keywords": ["total students", "student strength", "student population", "enrollment", "total intake", "student count"]
+            "search_keywords": ["total students", "student strength", "actual student strength", "total enrollment", "NIRF student strength", "program wise student count"]
         },
         {
             "field_name": "female_students_enrolled",
@@ -273,10 +334,10 @@ KPI_SCHEMA = {
             "data_type": "integer",
             "unit": "count",
             "validation_rules": "positive integer <= total_students_enrolled",
-            "extraction_instruction": "Count of female students currently enrolled across all programs.",
+            "extraction_instruction": "[NIRF EXTRACTABLE] Number of Female Students from Total Student Strength table. In NIRF document, look for 'No. of Female Students' or 'Female/Total Students' column in the Student Strength table. Sum across all programs and years.",
             "example_value": 2200,
             "remarks_required": False,
-            "search_keywords": ["female students", "girl students", "women students", "gender ratio", "female enrollment", "women in engineering"]
+            "search_keywords": ["female students", "girl students", "gender diversity", "NIRF female students", "no. of female students"]
         },
         {
             "field_name": "total_faculty",
@@ -285,10 +346,10 @@ KPI_SCHEMA = {
             "data_type": "integer",
             "unit": "count",
             "validation_rules": "positive integer",
-            "extraction_instruction": "Total number of full-time faculty members.",
+            "extraction_instruction": "[NIRF EXTRACTABLE] Total faculty count from Faculty Details table. In NIRF document, look for 'Faculty Details' table (Metric 2.4) and check the LAST ROW which typically shows the total count. Or sum all faculty rows.",
             "example_value": 300,
             "remarks_required": False,
-            "search_keywords": ["total faculty", "faculty members", "teaching staff", "professors", "faculty strength", "academic staff"]
+            "search_keywords": ["total faculty", "faculty details", "NIRF faculty", "faculty strength", "teaching staff", "sanctioned faculty"]
         },
         {
             "field_name": "phd_faculty",
@@ -297,10 +358,10 @@ KPI_SCHEMA = {
             "data_type": "integer",
             "unit": "count",
             "validation_rules": "positive integer <= total_faculty",
-            "extraction_instruction": "Number of faculty members with PhD qualifications.",
+            "extraction_instruction": "[NIRF EXTRACTABLE] Count of faculty with PhD qualification. In NIRF document, look at 'Faculty Details' table and find the 'Qualification' column. Count all rows where Qualification contains 'Ph.D' or 'PhD' or 'Doctorate'.",
             "example_value": 250,
             "remarks_required": False,
-            "search_keywords": ["PhD faculty", "doctorate faculty", "faculty with PhD", "PhD qualified", "faculty qualifications"]
+            "search_keywords": ["PhD faculty", "doctorate faculty", "NIRF PhD faculty", "qualification PhD", "faculty with PhD"]
         },
         {
             "field_name": "avg_teaching_experience",
@@ -309,10 +370,10 @@ KPI_SCHEMA = {
             "data_type": "float",
             "unit": "years",
             "validation_rules": "positive number",
-            "extraction_instruction": "Average years of teaching experience across all faculty members.",
+            "extraction_instruction": "[NIRF EXTRACTABLE] Average of 'Experience (In Months)' from Faculty Details. In NIRF document, find 'Faculty Details' table with 'Experience (In Months)' column. Calculate the average of all values in this column, then divide by 12 to convert months to years. Report as decimal (e.g., 12.5 years).",
             "example_value": 12.5,
             "remarks_required": False,
-            "search_keywords": ["teaching experience", "faculty experience", "years of experience", "experienced faculty", "faculty profile"]
+            "search_keywords": ["teaching experience", "experience in months", "NIRF faculty experience", "average experience", "faculty profile"]
         },
         {
             "field_name": "sports_infrastructure",
@@ -369,10 +430,10 @@ KPI_SCHEMA = {
             "data_type": "integer",
             "unit": "count",
             "validation_rules": "positive integer or 0",
-            "extraction_instruction": "Total number of students currently enrolled in PhD/doctoral programs. Look for 'research scholars', 'PhD students', 'doctoral candidates'. Check NIRF data, annual reports, and research section.",
+            "extraction_instruction": "[NIRF EXTRACTABLE] Ph.D Student Details - sum of Full Time and Part Time. In NIRF document, look for 'Ph.D Student Details' section (including Integrated Ph.D) showing students pursuing doctoral program till 2023-24. Add 'Full Time' + 'Part Time' students. Do NOT include students admitted in 2024-25.",
             "example_value": 85,
             "remarks_required": False,
-            "search_keywords": ["PhD students", "doctoral students", "research scholars", "PhD enrollment", "doctoral programme", "research scholar count", "PhD admissions", "doctoral candidates", "NIRF research scholars"]
+            "search_keywords": ["PhD students", "doctoral students", "research scholars", "NIRF PhD enrollment", "Ph.D student details", "full time part time PhD"]
         }
     ],
     "metadata": {
@@ -650,6 +711,83 @@ class StructuredDataParser:
         return extracted
 
 
+# ============ Source Priority Classification ============
+
+class SourcePriorityClassifier:
+    """Classify data sources by reliability priority for dual confidence assessment"""
+    
+    # HIGH PRIORITY: Official college websites and government portals
+    HIGH_PRIORITY_DOMAINS = [
+        'ac.in', 'edu.in', 'gov.in',
+        'nirfindia.org', 'nrf.gov.in',
+        'naac.gov.in', 'aicte-india.org',
+        'ugc.ac.in', 'ugc.gov.in',
+        'mhrd.gov.in', 'education.gov.in',
+        'nic.in'
+    ]
+    
+    # MEDIUM PRIORITY: Wikipedia and educational databases
+    MEDIUM_PRIORITY_DOMAINS = [
+        'wikipedia.org',
+        'wikidata.org',
+        'wikimedia.org',
+        'scholar.google.com',
+        'researchgate.net',
+        'academia.edu'
+    ]
+    
+    # LOW PRIORITY: Aggregator sites
+    LOW_PRIORITY_DOMAINS = [
+        'shiksha.com',
+        'collegeduniya.com',
+        'careers360.com',
+        'collegepravesh.com',
+        'collegedekho.com',
+        'getmyuni.com',
+        'studygap.com'
+    ]
+    
+    @classmethod
+    def get_source_priority(cls, url: str) -> str:
+        """Classify URL into priority levels. Returns: 'high', 'medium', or 'low'"""
+        if not url or url == "N/A":
+            return "low"
+        
+        url_lower = url.lower()
+        
+        # Check high priority domains
+        for domain in cls.HIGH_PRIORITY_DOMAINS:
+            if domain in url_lower:
+                return "high"
+        
+        # Check medium priority domains
+        for domain in cls.MEDIUM_PRIORITY_DOMAINS:
+            if domain in url_lower:
+                return "medium"
+        
+        # Check low priority domains
+        for domain in cls.LOW_PRIORITY_DOMAINS:
+            if domain in url_lower:
+                return "low"
+        
+        # Default: if it's .ac.in or .edu.in, high priority
+        if '.ac.in' in url_lower or '.edu.in' in url_lower:
+            return "high"
+        
+        # Otherwise medium (benefit of doubt)
+        return "medium"
+    
+    @classmethod
+    def get_confidence_from_priority(cls, priority: str) -> str:
+        """Map source priority to confidence level. Returns: 'high', 'medium', or 'low'"""
+        priority_to_confidence = {
+            'high': 'high',
+            'medium': 'medium',
+            'low': 'low'
+        }
+        return priority_to_confidence.get(priority, 'low')
+
+
 # ============ KPI Auditor Class ============
 
 class CollegeKPIAuditor:
@@ -688,7 +826,7 @@ class CollegeKPIAuditor:
         logger.info(f"Loaded {len(kpis)} KPIs from schema")
         return kpis
 
-    def search_for_kpi(self, college_name: str, kpi: Dict, abbreviation: str = "") -> Dict[str, Any]:
+    def search_for_kpi(self, college_name: str, kpi: Dict, abbreviation: str = "", college_website_url: Optional[str] = None) -> Dict[str, Any]:
         """Search specifically for a single KPI using its keywords - ENHANCED VERSION"""
         kpi_data = {
             "kpi_name": kpi['name'],
@@ -715,10 +853,18 @@ class CollegeKPIAuditor:
         
         # Reduced to 3 queries per KPI for speed
         for query in queries[:3]:
-            result = self.search_official_sources(query, num_results=5)
+            result = self.search_official_sources(query, num_results=5, restrict_to_site=college_website_url)
             if result.get("official_results"):
                 for r in result["official_results"]:
                     url = r.get('url', '')
+                    
+                    # STRICT: Filter to college domain only when available
+                    if college_website_url:
+                        college_domain = urlparse(college_website_url).netloc
+                        result_domain = urlparse(url).netloc
+                        if college_domain != result_domain:
+                            continue
+                    
                     if url not in seen_urls:
                         seen_urls.add(url)
                         kpi_data["search_results"].append(r)
@@ -734,7 +880,7 @@ class CollegeKPIAuditor:
         
         return kpi_data
 
-    def search_public_disclosure(self, college_name: str, abbreviation: str = "") -> Dict[str, Any]:
+    def search_public_disclosure(self, college_name: str, abbreviation: str = "", college_website_url: Optional[str] = None) -> Dict[str, Any]:
         """
         Search for Mandatory Public Disclosure pages (AICTE/UGC requirement).
         These pages contain standardized KPI data like faculty, infrastructure, placements, etc.
@@ -760,7 +906,7 @@ class CollegeKPIAuditor:
         
         # Execute disclosure searches in parallel
         def run_disclosure_search(query):
-            return self.search_official_sources(query, num_results=10)
+            return self.search_official_sources(query, num_results=10, restrict_to_site=college_website_url)
         
         with ThreadPoolExecutor(max_workers=4) as executor:
             future_to_query = {executor.submit(run_disclosure_search, q): q for q in disclosure_queries}
@@ -1119,22 +1265,120 @@ class CollegeKPIAuditor:
         
         return institute_info
 
+    async def get_college_website_from_gemini(self, college_name: str, client) -> Optional[str]:
+        """Ask Gemini to provide the official website URL for the college"""
+        try:
+            prompt = f"""What is the official website URL for {college_name}?
+
+Provide ONLY the complete base URL (no paths or pages).
+
+Examples:
+- IIT Bombay → https://www.iitb.ac.in
+- BITS Pilani → https://www.bits-pilani.ac.in
+- Anna University → https://www.annauniv.edu
+- Chandigarh University → https://www.cuchd.in
+
+{college_name} → """
+            
+            response = client.models.generate_content(
+                model='gemini-2.5-flash',
+                contents=prompt,
+                config=types.GenerateContentConfig(
+                    temperature=0.3,  # Slightly higher to avoid truncation
+                    max_output_tokens=300  # Ensure full URL is returned
+                )
+            )
+            
+            # Get raw response text
+            raw_text = response.text.strip()
+            logger.info(f"[GEMINI] Raw response: '{raw_text}'")
+            
+            # Clean up the response - remove markdown, extra whitespace, etc.
+            url = raw_text.replace('```', '').replace('`', '').strip()
+            
+            # Remove common prefixes if present
+            for prefix in ['Official Website URL:', 'URL:', 'Website:', 'Answer:']:
+                if url.startswith(prefix):
+                    url = url[len(prefix):].strip()
+            
+            # Extract URL if it's in a sentence using regex
+            import re
+            url_match = re.search(r'https?://[a-zA-Z0-9][-a-zA-Z0-9._]*\.[a-zA-Z]{2,}[^\s<>"{}|\\^`\[\]]*', url)
+            if url_match:
+                url = url_match.group(0)
+                logger.info(f"[GEMINI] Extracted URL from text: {url}")
+            
+            # Clean trailing punctuation
+            url = url.rstrip('.,;:')
+            
+            if url.startswith('http'):
+                # Extract base URL
+                parsed = urlparse(url)
+                # Validate domain has proper TLD (at least 2 chars after last dot)
+                if parsed.netloc and '.' in parsed.netloc:
+                    # Check that the TLD (after last dot) is at least 2 characters
+                    # This filters out incomplete domains like "www.iitr" (missing ".ac.in")
+                    parts = parsed.netloc.split('.')
+                    tld = parts[-1].lower() if len(parts) > 0 else ""
+                    
+                    # Common valid TLDs for educational institutions
+                    valid_tlds = ['in', 'edu', 'com', 'org', 'net', 'gov', 'ac']
+                    
+                    # Check if TLD is valid OR if domain has at least 3 parts (e.g., www.iitb.ac.in)
+                    if len(tld) >= 2 and len(parts) >= 2:
+                        # For 2-part domains (www.xxx), TLD must be from known list
+                        # For 3+ part domains (www.xxx.yyy.zzz), allow any TLD ≥2 chars
+                        if len(parts) == 2 and tld not in valid_tlds:
+                            logger.warning(f"[GEMINI] Invalid TLD for 2-part domain: {tld} (domain={parsed.netloc})")
+                            return None
+                        
+                        # Additional check: domain should be at least 6 chars (e.g., "aa.in")
+                        if len(parsed.netloc) >= 6:
+                            base_url = f"{parsed.scheme}://{parsed.netloc}"
+                            logger.info(f"[GEMINI] Identified official website: {base_url}")
+                            return base_url
+                        else:
+                            logger.warning(f"[GEMINI] Domain too short: {parsed.netloc}")
+                            return None
+                    else:
+                        logger.warning(f"[GEMINI] Incomplete domain. TLD='{tld}', parts={parts}")
+                        return None
+                else:
+                    logger.warning(f"[GEMINI] Invalid domain. Parsed: scheme={parsed.scheme}, netloc='{parsed.netloc}', path={parsed.path}")
+                    return None
+            
+            logger.warning(f"[GEMINI] Could not extract valid URL from response: '{url}'")
+            return None
+            
+        except Exception as e:
+            logger.error(f"[GEMINI] Error getting college website: {e}")
+            return None
+    
     @retry_with_backoff(max_retries=3, base_delay=0.5)
-    def search_official_sources(self, query: str, num_results: int = 10) -> Dict[str, Any]:
+    def search_official_sources(self, query: str, num_results: int = 10, restrict_to_site: Optional[str] = None) -> Dict[str, Any]:
         """Perform web search with strict filtering for official sources only - WITH CACHING"""
         if not self.serper_api_key:
             return {"error": "SERPER_API_KEY not set", "results": []}
         
         # Check cache first
-        cache_key = search_cache._get_key(query, num_results)
+        cache_key = search_cache._get_key(query, num_results, restrict_to_site)
         cached_result = search_cache.get(cache_key)
         if cached_result is not None:
             logger.debug(f"Cache hit for query: {query[:50]}...")
             return cached_result
         
+        # Add site restriction if provided
+        search_query = query
+        if restrict_to_site:
+            # Extract domain from URL
+            parsed = urlparse(restrict_to_site)
+            domain = parsed.netloc or restrict_to_site
+            search_query = f"site:{domain} {query}"
+            logger.debug(f"Restricting search to site: {domain}")
+        
         url = "https://google.serper.dev/search"
         payload = {
-            "q": query,
+            "q": search_query,
             "num": num_results,
             "gl": "in",
             "hl": "en"
@@ -1193,6 +1437,14 @@ class CollegeKPIAuditor:
             
             return result
             
+        except requests.exceptions.HTTPError as e:
+            if e.response.status_code == 400:
+                logger.error(f"Search failed for query '{query}': {e}")
+                # Raise a specific exception to trigger API key rotation
+                raise APIKeyExhaustedException(f"400 Bad Request for query '{query}': {e}")
+            else:
+                logger.error(f"Search failed for query '{query}': {e}")
+                return {"error": str(e), "results": []}
         except Exception as e:
             logger.error(f"Search failed for query '{query}': {e}")
             return {"error": str(e), "results": []}
@@ -1216,7 +1468,7 @@ class CollegeKPIAuditor:
         
         return "Other Official"
 
-    async def gather_official_data(self, college_name: str, progress_callback=None) -> Dict[str, Any]:
+    async def gather_official_data(self, college_name: str, progress_callback=None, college_website_url: Optional[str] = None) -> Dict[str, Any]:
         """
         Gather data ONLY from official sources with ACTUAL page content:
         1. Official College Website (fetched content)
@@ -1233,8 +1485,16 @@ class CollegeKPIAuditor:
             "public_disclosure_content": [],
             "nirf": [],
             "naac": [],
+            "wikipedia": [],
+            "wikipedia_content": [],
+            "aggregator_sites": [],
             "combined_text": "",
-            "fetched_urls": set()
+            "fetched_urls": set(),
+            "source_priority_breakdown": {
+                "high_priority": [],
+                "medium_priority": [],
+                "low_priority": []
+            }
         }
         
         # Generate college abbreviation for better searches
@@ -1250,21 +1510,31 @@ class CollegeKPIAuditor:
             await progress_callback("Searching Official College Website...", 5)
         
         # Consolidated search queries for speed
-        official_queries = [
-            f'site:.ac.in OR site:.edu.in "{clean_name}" official placements faculty',
-            f'"{clean_name}" official courses fees infrastructure hostel',
-            f'"{clean_name}" placement statistics 2024 2025',
-            f'"{clean_name}" PhD research scholars doctoral students enrollment',
-        ]
-        
-        if abbreviation:
-            official_queries.append(f'site:.ac.in OR site:.edu.in "{abbreviation}" official')
+        # Use college website restriction if available, otherwise fallback to .ac.in/.edu.in
+        if college_website_url:
+            official_queries = [
+                f'"{clean_name}" official placements faculty',
+                f'"{clean_name}" official courses fees infrastructure hostel',
+                f'"{clean_name}" placement statistics 2024 2025',
+                f'"{clean_name}" PhD research scholars doctoral students enrollment',
+            ]
+            if abbreviation:
+                official_queries.append(f'"{abbreviation}" official')
+        else:
+            official_queries = [
+                f'site:.ac.in OR site:.edu.in "{clean_name}" official placements faculty',
+                f'"{clean_name}" official courses fees infrastructure hostel',
+                f'"{clean_name}" placement statistics 2024 2025',
+                f'"{clean_name}" PhD research scholars doctoral students enrollment',
+            ]
+            if abbreviation:
+                official_queries.append(f'site:.ac.in OR site:.edu.in "{abbreviation}" official')
         
         official_urls_to_fetch = set()
         
         # Execute searches in parallel using ThreadPoolExecutor
         def run_search(query):
-            return self.search_official_sources(query, num_results=8)
+            return self.search_official_sources(query, num_results=8, restrict_to_site=college_website_url)
         
         with ThreadPoolExecutor(max_workers=4) as executor:
             future_to_query = {executor.submit(run_search, q): q for q in official_queries}
@@ -1272,6 +1542,21 @@ class CollegeKPIAuditor:
                 result = future.result()
                 if result.get("official_results"):
                     for r in result["official_results"]:
+                        url = r.get('url', '')
+                        
+                        # STRICT: If we have college website, only accept URLs from that domain
+                        if college_website_url:
+                            college_domain = urlparse(college_website_url).netloc
+                            result_domain = urlparse(url).netloc
+                            if college_domain != result_domain:
+                                logger.debug(f"Filtering out non-college URL: {url} (not from {college_domain})")
+                                continue
+                        
+                        # Add source priority classification
+                        priority = SourcePriorityClassifier.get_source_priority(url)
+                        r['source_priority'] = priority
+                        all_data["source_priority_breakdown"][f"{priority}_priority"].append(url)
+                        
                         if r['source_type'] == "Official College Website":
                             all_data["official_website"].append(r)
                             combined_text_parts.append(f"[OFFICIAL WEBSITE SEARCH]\nTitle: {r['title']}\nURL: {r['url']}\nSnippet: {r['snippet']}\n")
@@ -1300,6 +1585,7 @@ class CollegeKPIAuditor:
                 url = future_to_url[future]
                 page_content = future.result()
                 if page_content and page_content.get("success") and page_content.get("content"):
+                    page_content['source_priority'] = 'high'  # Official website is high priority
                     all_data["official_website_content"].append(page_content)
                     all_data["fetched_urls"].add(url)
                     combined_text_parts.append(f"[OFFICIAL WEBSITE PAGE CONTENT]\nURL: {url}\nTitle: {page_content.get('title', '')}\nContent: {page_content['content']}\n")
@@ -1310,11 +1596,12 @@ class CollegeKPIAuditor:
             await progress_callback("Searching Mandatory Public Disclosure pages...", 45)
         
         # Search for public disclosure pages and PDFs
-        disclosure_data = self.search_public_disclosure(clean_name, abbreviation)
+        disclosure_data = self.search_public_disclosure(clean_name, abbreviation, college_website_url)
         
         # Process disclosure pages - these contain standardized KPI data
         disclosure_pages_to_fetch = []
         for page in disclosure_data.get("pages", [])[:4]:
+            page['source_priority'] = 'high'  # Mandatory disclosure is high priority
             all_data["public_disclosure"].append(page)
             disclosure_pages_to_fetch.append(page['url'])
             combined_text_parts.append(f"[PUBLIC DISCLOSURE PAGE]\nTitle: {page['title']}\nURL: {page['url']}\nSnippet: {page['snippet']}\n")
@@ -1335,6 +1622,7 @@ class CollegeKPIAuditor:
                     
                     # Add page content
                     if result.get("page_content") and result["page_content"].get("success"):
+                        result["page_content"]['source_priority'] = 'high'
                         all_data["public_disclosure_content"].append(result["page_content"])
                         all_data["fetched_urls"].add(page_url)
                         combined_text_parts.append(f"[PUBLIC DISCLOSURE PAGE CONTENT]\nURL: {page_url}\nTitle: {result['page_content'].get('title', '')}\nContent: {result['page_content']['content']}\n")
@@ -1342,6 +1630,7 @@ class CollegeKPIAuditor:
                     
                     # Add PDF contents - these are gold for KPIs
                     for pdf_content in result.get("pdf_contents", []):
+                        pdf_content['source_priority'] = 'high'
                         all_data["public_disclosure_content"].append(pdf_content)
                         combined_text_parts.append(f"[PUBLIC DISCLOSURE PDF - HIGH VALUE KPI DATA]\nURL: {pdf_content['url']}\nTitle: {pdf_content.get('title', 'PDF Document')}\nContent: {pdf_content['content']}\n")
                         logger.info(f"Extracted disclosure PDF: {pdf_content['url']} ({len(pdf_content.get('content', ''))} chars)")
@@ -1360,14 +1649,133 @@ class CollegeKPIAuditor:
             disclosure_count = len(all_data.get("public_disclosure_content", []))
             await progress_callback(f"Public Disclosure complete: {disclosure_count} documents fetched", 52)
         
-        # ============ PRIORITY 3: NIRF DATA ============
+        # ============ PRIORITY 3: NIRF DATA (ENHANCED DISCOVERY) ============
         if progress_callback:
             await progress_callback("Searching NIRF Documents...", 55)
         
+        # Enhanced NIRF discovery using dedicated collector
+        nirf_enhanced_docs = []
+        if NIRFCollector and collect_nirf_for_college:
+            try:
+                # Try to get college website URL from official_website results
+                college_website_url = None
+                if all_data.get("official_website"):
+                    for result in all_data["official_website"]:
+                        url = result.get('url', '')
+                        if '.ac.in' in url or '.edu.in' in url:
+                            college_website_url = '/'.join(url.split('/')[:3])  # Get base URL
+                            break
+                
+                # Initialize URL-to-year mapping
+                if 'nirf_url_to_year' not in all_data:
+                    all_data['nirf_url_to_year'] = {}
+                
+                # Run comprehensive NIRF discovery
+                if college_website_url:
+                    logger.info(f"[NIRF ENHANCED] Starting comprehensive NIRF 2025 discovery for {clean_name}")
+                    if progress_callback:
+                        await progress_callback(f"Deep scanning for NIRF 2025 data...", 56)
+                    
+                    nirf_results = await collect_nirf_for_college(clean_name, college_website_url)
+                    
+                    # Add discovered documents metadata to nirf list
+                    # Also build comprehensive URL-to-year mapping for all NIRF docs
+                    for doc in nirf_results.get('all', [])[:25]:  # Top 25 NIRF docs
+                        if doc.year:  # Store year mapping for all docs
+                            all_data.setdefault('nirf_url_to_year', {})[doc.url] = doc.year
+                        
+                        nirf_enhanced_docs.append({
+                            'title': doc.title,
+                            'url': doc.url,
+                            'snippet': f"NIRF {doc.year or 'N/A'} {doc.category or ''} - {doc.doc_type}",
+                            'source_type': 'NIRF',
+                            'source_priority': 'high',
+                            'priority': doc.priority_score,
+                            'year': doc.year,
+                            'doc_type': doc.doc_type
+                        })
+                    
+                    nirf_2025_count = sum(1 for doc in nirf_results.get('all', []) if doc.year == 2025)
+                    logger.info(f"[NIRF ENHANCED] Found {len(nirf_results.get('all', []))} NIRF documents ({nirf_2025_count} from 2025)")
+                    
+                    if progress_callback:
+                        year_label = "2025" if nirf_2025_count > 0 else "latest available"
+                        await progress_callback(f"Extracting content from {min(12, len(nirf_results.get('all', [])))} NIRF {year_label} documents...", 58)
+                    
+                    # Fetch content from top NIRF documents (prioritize 2025 and PDFs)
+                    top_nirf_docs = sorted(
+                        [doc for doc in nirf_results.get('all', [])[:15] if doc.doc_type in ('pdf', 'excel', 'html')],
+                        key=lambda x: (x.year or 0, x.priority_score),
+                        reverse=True
+                    )[:12]
+                    
+                    nirf_fetched_count = 0
+                    # Create URL-to-year mapping for later recency calculation
+                    nirf_url_to_year = {}
+                    
+                    for doc in top_nirf_docs:
+                        if doc.doc_type == 'pdf':
+                            logger.info(f"[NIRF] Fetching PDF: {doc.title} from {doc.url}")
+                            pdf_content = self._fetch_pdf_content(doc.url, max_length=30000)
+                            if pdf_content.get("success") and pdf_content.get('content'):
+                                nirf_fetched_count += 1
+                                nirf_url_to_year[doc.url] = doc.year  # Store year mapping
+                                all_data["nirf"].append({
+                                    'title': doc.title,
+                                    'url': doc.url,
+                                    'snippet': f"NIRF {doc.year} {doc.category or ''} document",
+                                    'content': pdf_content.get('content', ''),
+                                    'source_priority': 'high',
+                                    'priority_score': doc.priority_score,
+                                    'year': doc.year
+                                })
+                                combined_text_parts.append(
+                                    f"[NIRF {doc.year} {doc.category or ''} PDF - CRITICAL DATA]\n"
+                                    f"URL: {doc.url}\nTitle: {doc.title}\n"
+                                    f"Content: {pdf_content.get('content', '')[:12000]}\n"
+                                )
+                                logger.info(f"[NIRF] Extracted {len(pdf_content.get('content', ''))} chars from {doc.title}")
+                        
+                        elif doc.doc_type == 'html':
+                            logger.info(f"[NIRF] Fetching HTML: {doc.title} from {doc.url}")
+                            page_content = self.fetch_webpage_content(doc.url, max_length=15000)
+                            if page_content.get("success") and page_content.get('content'):
+                                nirf_fetched_count += 1
+                                nirf_url_to_year[doc.url] = doc.year  # Store year mapping
+                                all_data["nirf"].append({
+                                    'title': doc.title,
+                                    'url': doc.url,
+                                    'snippet': f"NIRF {doc.year} {doc.category or ''} page",
+                                    'content': page_content.get('content', ''),
+                                    'source_priority': 'high',
+                                    'priority_score': doc.priority_score,
+                                    'year': doc.year
+                                })
+                                combined_text_parts.append(
+                                    f"[NIRF {doc.year} {doc.category or ''} Page - RANKING DATA]\n"
+                                    f"URL: {doc.url}\nTitle: {doc.title}\n"
+                                    f"Content: {page_content.get('content', '')[:8000]}\n"
+                                )
+                                logger.info(f"[NIRF] Extracted {len(page_content.get('content', ''))} chars from {doc.title}")
+                    
+                    logger.info(f"[NIRF ENHANCED] Successfully fetched content from {nirf_fetched_count} NIRF documents")
+                    if progress_callback:
+                        await progress_callback(f"NIRF discovery complete: {nirf_fetched_count} documents extracted", 62)
+                    
+                    # Store year mapping in all_data for later use
+                    all_data["nirf_url_to_year"] = nirf_url_to_year
+                        
+            except Exception as e:
+                logger.error(f"[NIRF ENHANCED] Failed: {e}", exc_info=True)
+                if progress_callback:
+                    await progress_callback(f"NIRF enhanced search encountered error, using fallback", 60)
+        
+        # Standard NIRF search as fallback/supplement - Focus on 2025
         nirf_queries = [
-            f'site:nirfindia.org "{clean_name}"',
-            f'"{clean_name}" NIRF 2024 ranking placement median salary',
-            f'"{clean_name}" NIRF research scholars PhD students faculty',
+            f'site:nirfindia.org "{clean_name}" 2025',
+            f'"{clean_name}" NIRF 2025 ranking',
+            f'"{clean_name}" NIRF 2025 data',
+            f'"{clean_name}" "NIRF 2025"',
         ]
         if abbreviation:
             nirf_queries.append(f'site:nirfindia.org "{abbreviation}"')
@@ -1384,42 +1792,69 @@ class CollegeKPIAuditor:
                             combined_text_parts.append(f"[NIRF]\nTitle: {r['title']}\nURL: {r['url']}\nData: {r['snippet']}\n")
         
         # ============ PRIORITY 4: NAAC DOCUMENTS ============
-        if progress_callback:
-            await progress_callback("Searching NAAC Documents...", 65)
+        # Only search external NAAC if we don't have college website
+        if not college_website_url:
+            if progress_callback:
+                await progress_callback("Searching NAAC Documents...", 65)
+            
+            naac_query = f'site:naac.gov.in "{clean_name}" OR "{clean_name}" NAAC accreditation'
+            result = self.search_official_sources(naac_query, num_results=5)
+            if result.get("official_results"):
+                for r in result["official_results"]:
+                    if 'naac' in r['url'].lower():
+                        r['source_priority'] = 'high'  # NAAC is high priority
+                        all_data["naac"].append(r)
+                        combined_text_parts.append(f"[NAAC]\\nTitle: {r['title']}\\nURL: {r['url']}\\nData: {r['snippet']}\\n")
+        else:
+            logger.info("Skipping external NAAC search - using college website only")
         
-        naac_query = f'site:naac.gov.in "{clean_name}" OR "{clean_name}" NAAC accreditation'
-        result = self.search_official_sources(naac_query, num_results=5)
-        if result.get("official_results"):
-            for r in result["official_results"]:
-                if 'naac' in r['url'].lower():
-                    all_data["naac"].append(r)
-                    combined_text_parts.append(f"[NAAC]\nTitle: {r['title']}\nURL: {r['url']}\nData: {r['snippet']}\n")
+        # ============ PRIORITY 5: WIKIPEDIA (MEDIUM PRIORITY) ============
+        # Skip Wikipedia if we have college website - focus on official college data
+        if not college_website_url:
+            if progress_callback:
+                await progress_callback("Fetching Wikipedia data...", 68)
+            
+            wiki_data = self.fetch_wikipedia_content(clean_name)
+            if wiki_data.get("success"):
+                wiki_result = {
+                    "title": wiki_data.get("title", ""),
+                    "url": wiki_data.get("url", ""),
+                    "snippet": wiki_data.get("summary", "")[:500],
+                    "source_priority": "medium"  # Wikipedia is medium priority
+                }
+                all_data["wikipedia"].append(wiki_result)
+                wiki_data['source_priority'] = 'medium'
+                all_data["wikipedia_content"].append(wiki_data)
+                combined_text_parts.append(f"[WIKIPEDIA]\nTitle: {wiki_result['title']}\nURL: {wiki_result['url']}\nSummary: {wiki_result['snippet']}\n")
+        else:
+            logger.info("Skipping Wikipedia - using college website only")
         
-        # ============ PRIORITY 5: PER-KPI TARGETED SEARCH (PARALLEL) ============
-        if progress_callback:
-            await progress_callback("Searching for specific KPI data (parallel)...", 70)
-        
-        all_data["kpi_specific_data"] = {}
-        
-        # Search KPIs in parallel batches
-        def search_single_kpi(kpi):
-            return (kpi['name'], self.search_for_kpi(clean_name, kpi, abbreviation))
-        
-        with ThreadPoolExecutor(max_workers=8) as executor:
-            future_to_kpi = {executor.submit(search_single_kpi, kpi): kpi for kpi in self.kpis_data}
-            for future in as_completed(future_to_kpi):
-                kpi_name, kpi_search_data = future.result()
-                all_data["kpi_specific_data"][kpi_name] = kpi_search_data
-                
-                # Add to combined text
-                if kpi_search_data["search_results"]:
-                    combined_text_parts.append(f"\n[KPI-SPECIFIC: {kpi_name}]")
-                    for r in kpi_search_data["search_results"][:2]:
-                        combined_text_parts.append(f"  Source: {r['url']}\n  Snippet: {r['snippet']}")
-                
-                if kpi_search_data["fetched_content"]:
-                    for content in kpi_search_data["fetched_content"][:1]:
-                        combined_text_parts.append(f"  [Fetched Page for {kpi_name}]\n  URL: {content['url']}\n  Content: {content['content'][:2000]}")
+        # ============ PRIORITY 6: PER-KPI TARGETED SEARCH (PARALLEL) ============
+        # Skip general KPI search when we have college website - we already have focused college data
+        if not college_website_url:
+            if progress_callback:
+                await progress_callback("Searching for specific KPI data (parallel)...", 70)
+            
+            all_data["kpi_specific_data"] = {}
+            
+            # Search KPIs in parallel batches
+            def search_single_kpi(kpi):
+                return (kpi['name'], self.search_for_kpi(clean_name, kpi, abbreviation, college_website_url))
+            
+            with ThreadPoolExecutor(max_workers=8) as executor:
+                future_to_kpi = {executor.submit(search_single_kpi, kpi): kpi for kpi in self.kpis_data}
+                for future in as_completed(future_to_kpi):
+                    kpi_name, kpi_search_data = future.result()
+                    all_data["kpi_specific_data"][kpi_name] = kpi_search_data
+                    
+                    # Add to combined text
+                    if kpi_search_data["search_results"]:
+                        combined_text_parts.append(f"\n[KPI-SPECIFIC: {kpi_name}]")
+                        for r in kpi_search_data["search_results"][:2]:
+                            combined_text_parts.append(f"  Source: {r['url']}\\n  Snippet: {r['snippet']}")
+        else:
+            logger.info("Skipping per-KPI broad search - using college website only")
+            all_data["kpi_specific_data"] = {}
         
         if progress_callback:
             await progress_callback(f"KPI-specific search complete", 85)
@@ -1438,6 +1873,50 @@ class CollegeKPIAuditor:
         
         return all_data
 
+    def _extract_year_from_url_or_text(self, url: str, text: str = "") -> Optional[int]:
+        """Extract year from URL or text content using multiple patterns"""
+        import re
+        
+        # Check URL first (higher priority)
+        if url:
+            # Look for /2025/, /2024/, etc. in URL
+            year_match = re.search(r'/(202[0-7])/', url)
+            if year_match:
+                return int(year_match.group(1))
+            
+            # Look for 2025, 2024, etc. anywhere in URL
+            year_match = re.search(r'(202[0-7])', url)
+            if year_match:
+                return int(year_match.group(1))
+        
+        # Check text content
+        if text:
+            # Look for "NIRF 2025", "NIRF-2025", etc.
+            year_match = re.search(r'NIRF[\s-]*(202[0-7])', text, re.IGNORECASE)
+            if year_match:
+                return int(year_match.group(1))
+            
+            # Look for any 2020-2027 year
+            year_match = re.search(r'(202[0-7])', text)
+            if year_match:
+                return int(year_match.group(1))
+        
+        return None
+    
+    def _calculate_recency(self, year: Optional[int]) -> str:
+        """Calculate recency rating based on year"""
+        if not year:
+            return 'unknown'
+        
+        if year == 2025:
+            return 'high'
+        elif year == 2024:
+            return 'medium'
+        elif year <= 2023:
+            return 'low'
+        else:
+            return 'unknown'
+    
     def _get_college_abbreviation(self, college_name: str) -> str:
         """Get common abbreviation for college name"""
         name_lower = college_name.lower()
@@ -1601,6 +2080,24 @@ class CollegeKPIAuditor:
 
 INSTITUTION: "{college_name}"
 
+=== DUAL CONFIDENCE ASSESSMENT ===
+For each KPI, you must assess YOUR CONFIDENCE in the extraction based on:
+1. Data clarity and explicitness in source
+2. Consistency across multiple mentions
+3. Recency and relevance of information
+4. Whether data is from verified tables/structured content
+5. Need for inference or assumptions
+
+YOUR CONFIDENCE LEVELS:
+- "high": Direct quote, explicit value, from official source, clear and unambiguous, recent
+- "medium": Data found but requires interpretation, from secondary source, or older data
+- "low": Data inferred, unclear, requires significant assumptions, or very limited evidence
+
+NOTE: The system will ALSO calculate a separate confidence score based on source priority:
+- HIGH PRIORITY: Official college websites (.ac.in, .edu.in), Government portals (NIRF, NAAC, AICTE)
+- MEDIUM PRIORITY: Wikipedia, educational databases
+- LOW PRIORITY: Aggregator sites (Shiksha, CollegeDuniya, etc.)
+
 === EXTRACTION PHILOSOPHY ===
 AGGRESSIVE EXTRACTION: Find data even from indirect mentions. "Data Not Found" is only acceptable if NO related information exists anywhere.
 
@@ -1613,27 +2110,8 @@ AGGRESSIVE EXTRACTION: Find data even from indirect mentions. "Data Not Found" i
    - FALSE: Explicit statement of non-existence
    - null: ONLY if topic never mentioned
 5. CONTEXT CLUES: Use related data to infer missing values
-6. PRIORITIZE SOURCES:
-   a) Public Disclosure PDFs (AICTE mandated - highest trust)
-   b) NIRF data (government verified)
-   c) Official website content
-   d) NAAC documents (accreditation verified)
 
-=== CONFIDENCE SCORING ===
-- "high": Direct quote with exact value from official document
-- "medium": Calculated/inferred value OR from search snippets
-- "low": Estimated from context OR partial data
-
-=== DATA TYPE STRATEGIES ===
-| Type | Extraction Strategy |
-|------|---------------------|
-| Integer | Look for: "X students", "total of X", statistics tables |
-| Boolean | Look for: mentions, descriptions, facility lists, infrastructure pages |
-| Array | Look for: lists, menus, program pages, department listings |
-| Float | Look for: percentages, CTCs, ratios, averages |
-| Object | Look for: fee structures, cutoffs, key-value data in tables |
-
-=== OFFICIAL SOURCE DATA (READ EVERY SECTION) ===
+=== SOURCE DATA (PRIORITIZED BY RELIABILITY) ===
 {search_content}
 === END OF SOURCE DATA ===
 
@@ -1641,35 +2119,23 @@ AGGRESSIVE EXTRACTION: Find data even from indirect mentions. "Data Not Found" i
 {kpi_list_str}
 === END KPIs ===
 
-EXTRACTION EXAMPLES:
-Example 1 - Infrastructure:
-If source says "The college has smart classrooms with projectors and LMS system"
-→ ICT-Enabled Learning Infrastructure: true, confidence: high
-
-Example 2 - Numbers from context:
-If source says "We have 15 departments with an average of 50 faculty per department"
-→ Total Faculty: 750 (calculated: 15*50), confidence: medium
-
-Example 3 - Lists from descriptions:
-If source mentions "Our clubs include coding, robotics, music and drama societies"
-→ Active Clubs: ["Coding Club", "Robotics Club", "Music Society", "Drama Society"], confidence: high
-
 OUTPUT FORMAT - Return ONLY valid JSON array (no markdown, no explanation):
 [
   {{
     "kpi_name": "exact KPI name from list",
     "category": "category from list",
     "value": "extracted/derived value OR 'Data Not Found' only if truly absent",
-    "evidence_quote": "exact quote or calculation explanation",
+    "evidence_quote": "exact quote or calculation explanation (max 200 chars)",
     "source_url": "URL where found OR 'N/A'",
-    "source_type": "Official College Website/NIRF/NAAC/AICTE/UGC/Public Disclosure/Derived",
-    "confidence": "high/medium/low"
+    "source_type": "Official Website/NIRF/NAAC/Wikipedia/Aggregator/etc",
+    "llm_confidence": "high/medium/low - YOUR assessment of this extraction's reliability",
+    "llm_confidence_reason": "brief reason for your confidence level (1 sentence, max 100 chars)"
   }}
 ]
 
-MANDATORY: Extract ALL {len(kpis_batch)} KPIs. Use inference and context clues. Return ONLY the JSON array now:"""
+MANDATORY: Extract ALL {len(kpis_batch)} KPIs. Provide both value AND your confidence assessment. Return ONLY the JSON array now:"""
 
-        # Define response schema for accurate KPI extraction
+        # Define response schema for accurate KPI extraction with dual confidence
         kpi_response_schema = {
             "type": "array",
             "items": {
@@ -1681,9 +2147,10 @@ MANDATORY: Extract ALL {len(kpis_batch)} KPIs. Use inference and context clues. 
                     "evidence_quote": {"type": "string"},
                     "source_url": {"type": "string"},
                     "source_type": {"type": "string"},
-                    "confidence": {"type": "string", "enum": ["high", "medium", "low"]}
+                    "llm_confidence": {"type": "string", "enum": ["high", "medium", "low"]},
+                    "llm_confidence_reason": {"type": "string"}
                 },
-                "required": ["kpi_name", "category", "value", "evidence_quote", "source_url", "source_type", "confidence"]
+                "required": ["kpi_name", "category", "value", "evidence_quote", "source_url", "source_type", "llm_confidence"]
             }
         }
 
@@ -1710,15 +2177,75 @@ MANDATORY: Extract ALL {len(kpis_batch)} KPIs. Use inference and context clues. 
             
             results = json.loads(text.strip())
             
-            # Validate sources - ensure only official sources are cited
+            # Add system confidence based on source priority and validate results
             validated_results = []
+            nirf_url_to_year = search_data.get('nirf_url_to_year', {})
+            
             for r in results:
                 source_url = r.get('source_url', 'N/A')
                 
-                # Validate the source is actually official
-                if source_url != 'N/A' and not self.validator.is_official_source(source_url):
-                    # Don't reject, just mark as lower confidence
-                    r['confidence'] = 'medium' if r.get('confidence') == 'high' else r.get('confidence', 'low')
+                # CRITICAL: If no source URL, mark as Data Not Found
+                if not source_url or source_url in ['N/A', 'Not Available', '']:
+                    logger.debug(f"No source for {r.get('kpi_name', 'Unknown KPI')} - marking as Data Not Found")
+                    r['value'] = 'Data Not Found'
+                    r['evidence_quote'] = 'No verifiable source available'
+                    r['source_url'] = 'N/A'
+                    r['source_type'] = 'N/A'
+                    r['system_confidence'] = 'low'
+                    r['llm_confidence'] = 'low'
+                    r['llm_confidence_reason'] = 'No source available'
+                    r['source_priority'] = 'unknown'
+                    r['confidence'] = 'low'
+                    r['data_year'] = None
+                    r['recency'] = 'unknown'
+                    validated_results.append(r)
+                    continue
+                
+                # Calculate SYSTEM CONFIDENCE from source priority
+                source_priority = SourcePriorityClassifier.get_source_priority(source_url)
+                system_confidence = SourcePriorityClassifier.get_confidence_from_priority(source_priority)
+                r['source_priority'] = source_priority
+                
+                # Extract data year - try multiple methods
+                data_year = None
+                
+                # Method 1: Exact match in NIRF mapping
+                data_year = nirf_url_to_year.get(source_url)
+                
+                # Method 2: Fuzzy match in NIRF mapping (check if any NIRF URL is contained in source_url)
+                if not data_year:
+                    for nirf_url, year in nirf_url_to_year.items():
+                        # Remove trailing slashes and compare
+                        if nirf_url.rstrip('/') in source_url or source_url.rstrip('/') in nirf_url:
+                            data_year = year
+                            break
+                
+                # Method 3: Extract from URL pattern or evidence text
+                if not data_year:
+                    evidence = r.get('evidence_quote', '')
+                    data_year = self._extract_year_from_url_or_text(source_url, evidence)
+                
+                # Set year and calculate recency
+                if data_year:
+                    r['data_year'] = data_year
+                    r['recency'] = self._calculate_recency(data_year)
+                else:
+                    r['data_year'] = None
+                    r['recency'] = 'unknown'
+                
+                # Add system confidence
+                r['system_confidence'] = system_confidence
+                
+                # Ensure llm_confidence exists (fallback to medium if missing)
+                if 'llm_confidence' not in r:
+                    r['llm_confidence'] = 'medium'
+                    r['llm_confidence_reason'] = 'Not explicitly provided by LLM'
+                
+                # Legacy 'confidence' field = system confidence (for backward compatibility)
+                r['confidence'] = system_confidence
+                
+                # Note: We rely on SourcePriorityClassifier for source validation
+                # No need for additional validation here as it can cause false downgrades
                 
                 validated_results.append(r)
             
@@ -1730,9 +2257,13 @@ MANDATORY: Extract ALL {len(kpis_batch)} KPIs. Use inference and context clues. 
                         "kpi_name": kpi['name'],
                         "category": kpi['category'],
                         "value": "Data Not Found",
-                        "evidence_quote": "Not found in official sources",
+                        "evidence_quote": "Not found in available sources",
                         "source_url": "N/A",
                         "source_type": "N/A",
+                        "llm_confidence": "low",
+                        "llm_confidence_reason": "No data available",
+                        "system_confidence": "low",
+                        "source_priority": "unknown",
                         "confidence": "low"
                     })
             
@@ -1755,6 +2286,10 @@ MANDATORY: Extract ALL {len(kpis_batch)} KPIs. Use inference and context clues. 
                     "evidence_quote": "Processing error",
                     "source_url": "N/A",
                     "source_type": "N/A",
+                    "llm_confidence": "low",
+                    "llm_confidence_reason": "Extraction failed",
+                    "system_confidence": "low",
+                    "source_priority": "unknown",
                     "confidence": "low"
                 }
                 for kpi in kpis_batch
@@ -1769,6 +2304,10 @@ MANDATORY: Extract ALL {len(kpis_batch)} KPIs. Use inference and context clues. 
                     "evidence_quote": str(e),
                     "source_url": "N/A",
                     "source_type": "N/A",
+                    "llm_confidence": "low",
+                    "llm_confidence_reason": "Error occurred",
+                    "system_confidence": "low",
+                    "source_priority": "unknown",
                     "confidence": "low"
                 }
                 for kpi in kpis_batch
@@ -1870,7 +2409,7 @@ MANDATORY: Extract ALL {len(kpis_batch)} KPIs. Use inference and context clues. 
         return validated_results
 
     async def run_audit(self, college_name: str, progress_callback=None) -> List[Dict]:
-        """Run the complete audit process with STRICT official source filtering"""
+        """Run the complete audit process with NIRF-first strategy"""
         
         if not self.gemini_api_key:
             return [{"kpi_name": "Error", "category": "Config", "value": "GEMINI_API_KEY not set", 
@@ -1883,54 +2422,261 @@ MANDATORY: Extract ALL {len(kpis_batch)} KPIs. Use inference and context clues. 
         # Initialize modern google-genai client
         client = genai.Client(api_key=self.gemini_api_key)
         
-        # Step 1: Gather data from OFFICIAL sources only
+        # ======== PHASE 0: GET COLLEGE WEBSITE FROM GEMINI ========
         if progress_callback:
-            await progress_callback("Starting audit - gathering from OFFICIAL sources only...", 2)
+            await progress_callback("Identifying official college website...", 2)
         
-        search_data = await self.gather_official_data(college_name, progress_callback)
+        logger.info(f"[PHASE 0] Asking Gemini for official website of {college_name}")
+        college_website_url = await self.get_college_website_from_gemini(college_name, client)
         
-        # Extract structured data from content using parser
-        structured_data = self._extract_structured_data(search_data)
-        search_data["structured_extracted"] = structured_data
+        if not college_website_url:
+            # Fallback: Try search with better filtering
+            logger.warning(f"[PHASE 0] Gemini couldn't identify website, falling back to search")
+            try:
+                search_query = f'"{college_name}" site:.ac.in OR site:.edu.in'
+                result = self.search_official_sources(search_query, num_results=10)  # No restriction - we're finding the website
+                if result.get("official_results"):
+                    # Filter out irrelevant domains and find best match
+                    excluded_domains = ['nptel.ac.in', 'swayam.gov.in', 'aicte-india.org', 'ugc.ac.in', 
+                                       'naac.gov.in', 'nirfindia.org', 'mhrd.gov.in', 'education.gov.in',
+                                       'collegedunia.com', 'shiksha.com', 'careers360.com', 'getmyuni.com',
+                                       'collegedekho.com', 'studyabroad.shiksha.com', 'careerpoint.ac.in',
+                                       'betterstudy.in', 'universitykart.com', 'admissionhelpline24.com']
+                    
+                    college_name_lower = college_name.lower()
+                    # Extract key words from college name for matching
+                    key_words = [w.lower() for w in college_name.split() if len(w) > 3 and w.lower() not in ['college', 'university', 'institute', 'technology', 'engineering']]
+                    
+                    for r in result.get("official_results"):
+                        url = r.get('url', '')
+                        domain = urlparse(url).netloc.lower()
+                        
+                        # Skip excluded domains (including subdomains)
+                        if any(excluded in domain for excluded in excluded_domains):
+                            logger.debug(f"[PHASE 0] Skipping excluded domain: {domain}")
+                            continue
+                        
+                        # Check if domain or URL contains college name keywords
+                        if ('.ac.in' in url or '.edu.in' in url):
+                            # Prefer domains that contain keywords from college name
+                            domain_match = any(keyword in domain for keyword in key_words)
+                            url_match = any(keyword in url.lower() for keyword in key_words)
+                            
+                            if domain_match or url_match:
+                                college_website_url = '/'.join(url.split('/')[:3])
+                                logger.info(f"[PHASE 0] Found matching website from search: {college_website_url} (matched keywords: {[k for k in key_words if k in domain or k in url.lower()]})")
+                                break
+                    
+                    # If no match found with keywords, take first non-excluded .ac.in/.edu.in domain
+                    if not college_website_url:
+                        for r in result.get("official_results"):
+                            url = r.get('url', '')
+                            domain = urlparse(url).netloc.lower()
+                            if ('.ac.in' in url or '.edu.in' in url) and not any(excluded in domain for excluded in excluded_domains):
+                                college_website_url = '/'.join(url.split('/')[:3])
+                                logger.info(f"[PHASE 0] Using fallback website: {college_website_url}")
+                                break
+            except Exception as e:
+                logger.warning(f"Could not find college website: {e}")
         
-        total_sources = (len(search_data["official_website"]) + len(search_data["nirf"]) + 
-                        len(search_data["naac"]) + len(search_data.get("public_disclosure", [])))
+        if college_website_url:
+            logger.info(f"[PHASE 0] Using college website: {college_website_url}")
+        else:
+            logger.error(f"[PHASE 0] Could not determine college website URL")
         
-        if total_sources < 2:
-            return [{"kpi_name": "Error", "category": "Search", 
-                    "value": "Insufficient official sources found. Please verify college name.", 
-                    "evidence_quote": f"Found only {total_sources} official sources",
-                    "source_url": "", "confidence": "low"}]
-        
+        # Check for cancellation
         if progress_callback:
-            await progress_callback(f"Found {total_sources} official sources. Extracting KPIs...", 90)
+            try:
+                await progress_callback("Starting NIRF document search...", 3)
+            except Exception as e:
+                if "cancelled" in str(e).lower():
+                    logger.info(f"Audit cancelled during Phase 0")
+                    return []
+                raise
         
-        # Step 2: Extract KPIs in smaller batches for better accuracy (5 KPIs per batch)
-        all_results = []
-        batch_size = 5  # Smaller batches for better accuracy on each KPI
-        total_kpis = len(self.kpis_data)
+        # ======== PHASE 1: NIRF OVERALL DOCUMENT FIRST ========
+        if progress_callback:
+            await progress_callback("Finding NIRF Overall document...", 5)
         
-        for i in range(0, total_kpis, batch_size):
-            batch = self.kpis_data[i:i + batch_size]
-            batch_num = (i // batch_size) + 1
-            total_batches = (total_kpis + batch_size - 1) // batch_size
-            
+        logger.info(f"[PHASE 1] Searching for NIRF Overall document for {college_name}")
+        
+        nirf_results = {}
+        nirf_overall_doc = None
+        
+        # Search for NIRF data using enhanced collector
+        if NIRFCollector and collect_nirf_for_college and college_website_url:
+            try:
+                if progress_callback:
+                    await progress_callback("Scanning for NIRF 2025 Overall document...", 10)
+                
+                nirf_results = await collect_nirf_for_college(college_name, college_website_url)
+                
+                # Find NIRF Overall document (highest priority)
+                for doc in nirf_results.get('all', []):
+                    if doc.category == 'overall' and doc.doc_type == 'pdf' and doc.year == 2025:
+                        nirf_overall_doc = doc
+                        logger.info(f"[PHASE 1] Found NIRF 2025 Overall: {doc.url}")
+                        break
+                
+                # Fallback: Try 2024 or latest overall
+                if not nirf_overall_doc:
+                    for doc in nirf_results.get('all', []):
+                        if doc.category == 'overall' and doc.doc_type == 'pdf':
+                            nirf_overall_doc = doc
+                            logger.info(f"[PHASE 1] Found NIRF {doc.year} Overall: {doc.url}")
+                            break
+                            
+            except Exception as e:
+                logger.error(f"[PHASE 1] NIRF collection failed: {e}", exc_info=True)
+        
+        # ======== PHASE 2: EXTRACT KPIs FROM NIRF OVERALL ========
+        nirf_extracted_kpis = []
+        missing_kpis = []
+        nirf_search_data = {}  # Initialize here so it's always available
+        
+        if nirf_overall_doc:
             if progress_callback:
-                progress = 90 + int(((i + batch_size) / total_kpis) * 9)
-                await progress_callback(f"Extracting KPIs batch {batch_num}/{total_batches}...", min(progress, 99))
+                await progress_callback(f"Extracting KPIs from NIRF {nirf_overall_doc.year} Overall document...", 20)
             
-            batch_results = await self.extract_kpi_with_strict_sources(
-                college_name, batch, search_data, client
-            )
-            all_results.extend(batch_results)
+            logger.info(f"[PHASE 2] Extracting KPIs from NIRF Overall document")
             
-            await asyncio.sleep(0.05)  # Minimal delay between batches
+            # Fetch NIRF Overall PDF content
+            nirf_content = self._fetch_pdf_content(nirf_overall_doc.url, max_length=50000)
+            
+            if nirf_content.get('success') and nirf_content.get('content'):
+                # Build minimal search data with just NIRF content
+                nirf_search_data = {
+                    "nirf": [{
+                        'title': nirf_overall_doc.title,
+                        'url': nirf_overall_doc.url,
+                        'snippet': f"NIRF {nirf_overall_doc.year} Overall document",
+                        'content': nirf_content.get('content', ''),
+                        'source_priority': 'high',
+                        'year': nirf_overall_doc.year
+                    }],
+                    "official_website": [],
+                    "naac": [],
+                    "public_disclosure": [],
+                    "official_website_content": [],
+                    "public_disclosure_content": [],
+                    "kpi_specific_data": {},
+                    "nirf_url_to_year": {nirf_overall_doc.url: nirf_overall_doc.year},
+                    "structured_extracted": {}
+                }
+                
+                # Filter KPIs to only those extractable from NIRF
+                nirf_extractable_kpi_names = set(NIRF_EXTRACTABLE_KPIS.keys())
+                nirf_kpis = [kpi for kpi in self.kpis_data if kpi['name'] in nirf_extractable_kpi_names]
+                
+                logger.info(f"[PHASE 2] Attempting to extract {len(nirf_kpis)} NIRF-extractable KPIs from Overall document")
+                
+                # Extract only NIRF-extractable KPIs from NIRF document
+                if progress_callback:
+                    await progress_callback(f"Extracting {len(nirf_kpis)} KPIs from NIRF Overall...", 30)
+                
+                nirf_extracted_kpis = await self.extract_kpi_with_strict_sources(
+                    college_name, nirf_kpis, nirf_search_data, client
+                )
+                
+                # Identify which KPIs have data and which are missing
+                found_in_nirf = []
+                for result in nirf_extracted_kpis:
+                    value = str(result.get('value', '')).lower().strip()
+                    kpi_name = result.get('kpi_name')
+                    if value in ['data not found', 'error', 'not available', 'n/a', '']:
+                        missing_kpis.append(kpi_name)
+                    else:
+                        found_in_nirf.append(kpi_name)
+                
+                # Add all non-NIRF KPIs to missing list
+                all_kpi_names = [kpi['name'] for kpi in self.kpis_data]
+                non_nirf_kpis = [name for name in all_kpi_names if name not in nirf_extractable_kpi_names]
+                missing_kpis.extend(non_nirf_kpis)
+                
+                logger.info(f"[PHASE 2] NIRF Overall provided {len(found_in_nirf)}/{len(nirf_kpis)} extractable KPIs")
+                logger.info(f"[PHASE 2] Total missing KPIs: {len(missing_kpis)} (NIRF-extractable not found: {len(nirf_kpis) - len(found_in_nirf)}, Non-NIRF: {len(non_nirf_kpis)})")
+                
+                if progress_callback:
+                    await progress_callback(f"NIRF: {len(found_in_nirf)} found, {len(missing_kpis)} need search", 40)
+            else:
+                logger.warning(f"[PHASE 2] Could not fetch NIRF Overall PDF content")
+                missing_kpis = [kpi['name'] for kpi in self.kpis_data]
+        else:
+            logger.warning(f"[PHASE 1] No NIRF Overall document found")
+            missing_kpis = [kpi['name'] for kpi in self.kpis_data]
         
-        # Step 3: Validate and boost confidence
+        # ======== PHASE 3: SEARCH FOR MISSING KPIs ========
+        all_results = nirf_extracted_kpis.copy() if nirf_extracted_kpis else []
+        
+        if missing_kpis:
+            if progress_callback:
+                await progress_callback(f"Searching for {len(missing_kpis)} missing KPIs...", 45)
+            
+            logger.info(f"[PHASE 3] Searching for {len(missing_kpis)} missing KPIs")
+            
+            # Gather additional data sources for missing KPIs
+            try:
+                search_data = await self.gather_official_data(college_name, progress_callback, college_website_url)
+            except Exception as e:
+                if "cancelled" in str(e).lower():
+                    logger.info(f"Audit cancelled during Phase 3 data gathering")
+                    return all_results  # Return NIRF data collected so far
+                raise
+            
+            # Extract structured data
+            structured_data = self._extract_structured_data(search_data)
+            search_data["structured_extracted"] = structured_data
+            
+            # Get KPI objects for missing KPIs
+            missing_kpi_objects = [kpi for kpi in self.kpis_data if kpi['name'] in missing_kpis]
+            
+            # Extract missing KPIs in batches
+            batch_size = 5
+            for i in range(0, len(missing_kpi_objects), batch_size):
+                batch = missing_kpi_objects[i:i + batch_size]
+                batch_num = (i // batch_size) + 1
+                total_batches = (len(missing_kpi_objects) + batch_size - 1) // batch_size
+                
+                if progress_callback:
+                    progress = 60 + int(((i + batch_size) / len(missing_kpi_objects)) * 30)
+                    try:
+                        await progress_callback(f"Extracting missing KPIs batch {batch_num}/{total_batches}...", min(progress, 90))
+                    except Exception as e:
+                        if "cancelled" in str(e).lower():
+                            logger.info(f"Audit cancelled during batch {batch_num}")
+                            return all_results  # Return what we have so far
+                        raise
+                
+                try:
+                    batch_results = await self.extract_kpi_with_strict_sources(
+                        college_name, batch, search_data, client
+                    )
+                except Exception as e:
+                    if "cancelled" in str(e).lower():
+                        logger.info(f"Audit cancelled during KPI extraction")
+                        return all_results
+                    raise
+                
+                # Replace missing KPIs in results with newly found data
+                for new_result in batch_results:
+                    kpi_name = new_result.get('kpi_name')
+                    # Remove old "not found" result
+                    all_results = [r for r in all_results if r.get('kpi_name') != kpi_name]
+                    # Add new result
+                    all_results.append(new_result)
+                
+                await asyncio.sleep(0.05)
+        
+        # Step 4: Validate and boost confidence
         if progress_callback:
-            await progress_callback("Validating and cross-referencing results...", 99)
+            await progress_callback("Validating and cross-referencing results...", 95)
         
-        all_results = self._validate_and_boost_results(all_results, search_data)
+        # Build complete search data for validation
+        complete_search_data = nirf_search_data if nirf_overall_doc else {}
+        if missing_kpis:
+            complete_search_data.update(search_data)
+        
+        all_results = self._validate_and_boost_results(all_results, complete_search_data)
         
         if progress_callback:
             await progress_callback("Audit complete!", 100)
@@ -1946,16 +2692,19 @@ auditor = CollegeKPIAuditor()
 async def process_audit(audit_id: str, college_name: str):
     """Background task to process audit"""
     try:
-        institute_info = {}
-        
         async def progress_callback(message: str, progress: int):
             if audit_id in audits_store:
+                # Check if audit was cancelled
+                if audits_store[audit_id].get('status') == 'cancelled':
+                    logger.info(f"Audit {audit_id} was cancelled, stopping processing")
+                    raise Exception("Audit cancelled by user")
+                
                 audits_store[audit_id]["progress"] = progress
                 audits_store[audit_id]["progress_message"] = message
         
         results = await auditor.run_audit(college_name, progress_callback)
         
-        # Generate summary
+        # Generate summary with dual confidence metrics
         total = len(results)
         found = sum(1 for r in results if str(r.get('value', '')).lower() not in 
                    ['data not found', 'error', 'processing error', 'not available', ''])
@@ -1970,6 +2719,35 @@ async def process_audit(audit_id: str, college_name: str):
                 sources[src] = 0
             if str(r.get('value', '')).lower() not in ['data not found', 'error', '']:
                 sources[src] += 1
+        
+        # Source priority breakdown
+        source_priority_breakdown = {'high': 0, 'medium': 0, 'low': 0}
+        for r in results:
+            priority = r.get('source_priority', 'unknown')
+            if priority in source_priority_breakdown and str(r.get('value', '')).lower() not in ['data not found', 'error', '']:
+                source_priority_breakdown[priority] += 1
+        
+        # Confidence comparison (LLM vs System)
+        def confidence_value(level):
+            return {'high': 3, 'medium': 2, 'low': 1}.get(level, 0)
+        
+        confidence_comparison = {
+            'agreement': 0,  # LLM and System agree
+            'llm_higher': 0,  # LLM more confident than system
+            'system_higher': 0  # System more confident than LLM
+        }
+        
+        for r in results:
+            if str(r.get('value', '')).lower() not in ['data not found', 'error', '']:
+                sys_conf = r.get('system_confidence', 'low')
+                llm_conf = r.get('llm_confidence', 'low')
+                
+                if sys_conf == llm_conf:
+                    confidence_comparison['agreement'] += 1
+                elif confidence_value(llm_conf) > confidence_value(sys_conf):
+                    confidence_comparison['llm_higher'] += 1
+                else:
+                    confidence_comparison['system_higher'] += 1
         
         # Group by category
         categories = {}
@@ -1989,6 +2767,8 @@ async def process_audit(audit_id: str, college_name: str):
             "medium_confidence": medium_conf,
             "coverage_percentage": round((found / total) * 100, 1) if total > 0 else 0,
             "sources_breakdown": sources,
+            "source_priority_breakdown": source_priority_breakdown,
+            "confidence_comparison": confidence_comparison,
             "categories": categories
         }
         
@@ -1999,17 +2779,20 @@ async def process_audit(audit_id: str, college_name: str):
                 "progress_message": "Audit complete!",
                 "results": results,
                 "summary": summary,
-                "institute_info": institute_info,
                 "completed_at": datetime.now(timezone.utc).isoformat()
             })
         
     except Exception as e:
         logger.error(f"Audit processing error: {e}")
         if audit_id in audits_store:
-            audits_store[audit_id].update({
-                "status": "failed",
-                "progress_message": f"Error: {str(e)}"
-            })
+            # Check if it was a cancellation
+            if audits_store[audit_id].get('status') == 'cancelled':
+                logger.info(f"Audit {audit_id} cancellation confirmed")
+            else:
+                audits_store[audit_id].update({
+                    "status": "failed",
+                    "progress_message": f"Error: {str(e)}"
+                })
 
 
 # ============ API Routes ============
@@ -2068,6 +2851,46 @@ async def start_audit(request: AuditRequest, background_tasks: BackgroundTasks):
     background_tasks.add_task(process_audit, audit_id, college_name)
     
     return {"audit_id": audit_id, "status": "processing", "message": f"Audit started for {college_name}"}
+
+@api_router.post("/audit/{audit_id}/cancel")
+async def cancel_audit(audit_id: str):
+    """Cancel a running audit"""
+    audit = audits_store.get(audit_id)
+    
+    if not audit:
+        raise HTTPException(status_code=404, detail="Audit not found")
+    
+    current_status = audit.get('status', '')
+    
+    # Allow cancellation if processing or if status is not yet set
+    if current_status not in ['processing', '']:
+        # If already completed or failed, just return success
+        if current_status in ['completed', 'failed']:
+            return {
+                "message": f"Audit already {current_status}", 
+                "audit_id": audit_id,
+                "status": current_status
+            }
+        # If already cancelled, return success
+        if current_status == 'cancelled':
+            return {
+                "message": "Audit already cancelled", 
+                "audit_id": audit_id,
+                "status": "cancelled"
+            }
+    
+    # Mark as cancelled
+    audit['status'] = 'cancelled'
+    audit['progress_message'] = 'Audit cancelled by user'
+    audit['completed_at'] = datetime.now(timezone.utc).isoformat()
+    
+    logger.info(f"Audit {audit_id} cancelled by user")
+    
+    return {
+        "message": "Audit cancelled successfully", 
+        "audit_id": audit_id,
+        "status": "cancelled"
+    }
 
 @api_router.get("/audit/{audit_id}")
 async def get_audit_status(audit_id: str):
